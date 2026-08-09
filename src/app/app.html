@@ -1,0 +1,184 @@
+<main #sceneFrame class="scene-frame" aria-label="Velutinous Manul world creation" [attr.aria-busy]="isGenerating">
+  <canvas #gameCanvas aria-hidden="true"></canvas>
+
+  <section class="creation-dock" aria-labelledby="creation-title">
+    <div class="dock-header">
+      <p class="eyebrow">VELUTINOUS MANUL</p>
+      <h1 id="creation-title">Create New World</h1>
+      <p class="dock-intro">
+        Shape a deterministic continent, then explore the map before building your first industry.
+      </p>
+    </div>
+
+    <div class="dock-section identity-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">World identity</p>
+          <h2>Seed</h2>
+        </div>
+        <span class="section-value">VISIBLE</span>
+      </div>
+      <div class="seed-row">
+        <input aria-label="World seed" type="text" [value]="mapConfig.seed" [disabled]="controlsLocked" (input)="updateSeed($event)" />
+        <button class="quiet-button" type="button" [disabled]="controlsLocked" (click)="randomizeSeed()">Randomize</button>
+      </div>
+      <p class="field-hint">The same seed and settings always recreate the same world.</p>
+    </div>
+
+    <div class="dock-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Landscape character</p>
+          <h2>Choose a starting shape</h2>
+        </div>
+      </div>
+      <div class="preset-list" role="list" aria-label="Map presets">
+        <button class="preset-row" [class.is-selected]="mapConfig.preset === 'balanced-continental'" type="button" [disabled]="controlsLocked" (click)="selectPreset('balanced-continental')">
+          <span class="preset-swatch balanced-swatch"></span>
+          <span class="preset-copy">
+            <strong>Balanced Continental</strong>
+            <small>Broad land, varied relief, and dependable waterways.</small>
+          </span>
+          <span class="selected-mark" aria-label="Selected">●</span>
+        </button>
+        <button class="preset-row" [class.is-selected]="mapConfig.preset === 'riverlands'" type="button" [disabled]="controlsLocked" (click)="selectPreset('riverlands')">
+          <span class="preset-swatch riverlands-swatch"></span>
+          <span class="preset-copy">
+            <strong>Riverlands</strong>
+            <small>Lowlands shaped by broad rivers and wet corridors.</small>
+          </span>
+        </button>
+        <button class="preset-row" [class.is-selected]="mapConfig.preset === 'highland-frontier'" type="button" [disabled]="controlsLocked" (click)="selectPreset('highland-frontier')">
+          <span class="preset-swatch frontier-swatch"></span>
+          <span class="preset-copy">
+            <strong>Highland Frontier</strong>
+            <small>Rugged elevation, exposed valleys, and scarce flat ground.</small>
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <div class="dock-section tuning-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Fine tuning</p>
+          <h2>World settings</h2>
+        </div>
+        <span class="section-value">{{ presetLabel(mapConfig.preset) }}</span>
+      </div>
+      <div class="setting-list">
+        <div class="setting-row">
+          <div class="setting-label"><span>Water coverage</span><output>{{ formatPercent(mapConfig.waterCoverage) }}</output></div>
+          <input type="range" min="0" max="100" [value]="mapConfig.waterCoverage * 100" [disabled]="controlsLocked" aria-label="Water coverage" (input)="updateSetting('waterCoverage', $event)" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><span>Terrain roughness</span><output>{{ formatPercent(mapConfig.terrainRoughness) }}</output></div>
+          <input type="range" min="0" max="100" [value]="mapConfig.terrainRoughness * 100" [disabled]="controlsLocked" aria-label="Terrain roughness" (input)="updateSetting('terrainRoughness', $event)" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><span>Forest density</span><output>{{ formatPercent(mapConfig.forestDensity) }}</output></div>
+          <input type="range" min="0" max="100" [value]="mapConfig.forestDensity * 100" [disabled]="controlsLocked" aria-label="Forest density" (input)="updateSetting('forestDensity', $event)" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><span>Resource abundance</span><output>{{ formatPercent(mapConfig.resourceAbundance) }}</output></div>
+          <input type="range" min="0" max="100" [value]="mapConfig.resourceAbundance * 100" [disabled]="controlsLocked" aria-label="Resource abundance" (input)="updateSetting('resourceAbundance', $event)" />
+        </div>
+      </div>
+    </div>
+
+    <div class="dock-footer">
+      <div class="ready-state">
+        <span class="status-dot" [class.is-busy]="isGenerating" [class.is-error]="generationError !== null"></span>
+        <span>{{ isGenerating ? 'Generating locally' : generationError ? 'Generation needs attention' : 'Ready to generate' }}</span>
+      </div>
+      <div class="generation-error" [class.is-visible]="generationError !== null" role="alert" aria-live="assertive">
+        <strong>World generation could not complete.</strong>
+        <span>{{ generationError }}</span>
+        <button class="retry-button" type="button" (click)="generateWorld()">Try again</button>
+      </div>
+      <button class="primary-button" type="button" [disabled]="controlsLocked" (click)="generateWorld()">
+        <span>Generate World</span>
+        <span class="button-arrow">→</span>
+      </button>
+      <p class="footer-note">Generation runs locally in your browser.</p>
+    </div>
+  </section>
+
+  <div
+    class="generation-overlay"
+    [class.is-visible]="overlayState !== 'hidden'"
+    [class.is-error]="overlayState === 'error'"
+    [class.is-complete]="overlayState === 'complete'"
+    [attr.aria-hidden]="overlayState === 'hidden'"
+  >
+    <section class="generation-card" role="dialog" aria-modal="true" aria-labelledby="generation-card-title">
+      @if (overlayState === 'generating') {
+        <p class="generation-eyebrow">WORLD FORGE</p>
+        <h2 id="generation-card-title">Shaping your continent</h2>
+        <p class="generation-intro">Building a deterministic world from <code>{{ mapConfig.seed }}</code>.</p>
+
+        <div class="generation-progress-copy">
+          <span>{{ generationProgress.detail }}</span>
+          <output>{{ progressPercent }}%</output>
+        </div>
+        <div
+          class="generation-progress-track"
+          role="progressbar"
+          aria-label="World generation progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          [attr.aria-valuenow]="progressPercent"
+        >
+          <span [style.width.%]="progressPercent"></span>
+        </div>
+
+        <ol class="generation-milestones" aria-label="World generation milestones">
+          @for (milestone of generationMilestones; track milestone.id; let milestoneIndex = $index) {
+            <li
+              class="generation-milestone"
+              [class.is-complete]="isMilestoneComplete(milestoneIndex)"
+              [class.is-active]="isMilestoneActive(milestoneIndex)"
+              [class.is-upcoming]="isMilestoneUpcoming(milestoneIndex)"
+              [attr.aria-current]="isMilestoneActive(milestoneIndex) ? 'step' : null"
+            >
+              <span class="milestone-marker" aria-hidden="true">{{ milestoneMarker(milestoneIndex) }}</span>
+              <span>{{ milestone.label }}</span>
+            </li>
+          }
+        </ol>
+        <p class="generation-card-note" aria-live="polite">Generation runs locally in your browser.</p>
+      } @else if (overlayState === 'complete') {
+        <p class="generation-eyebrow">WORLD FORGE</p>
+        <h2 id="generation-card-title">World ready</h2>
+        <p class="generation-intro">Your deterministic continent is ready to explore.</p>
+
+        <div class="generation-summary-grid">
+          <div><span>Landmasses</span><strong>{{ lastMapSummary?.regionCount }}</strong></div>
+          <div><span>River cells</span><strong>{{ lastMapSummary?.riverCellCount }}</strong></div>
+          <div><span>Mineral deposits</span><strong>{{ lastMapSummary?.resourceSourceCount }}</strong></div>
+          <div><span>Generation time</span><strong>{{ formatDuration(lastMapSummary?.generationDurationMs ?? 0) }}</strong></div>
+        </div>
+
+        <div class="starting-area-confirmation"><span class="confirmation-mark">✓</span><span>Starting area secure</span></div>
+        <p class="generation-memory-note">
+          Memory estimate: {{ formatMemory(lastMapSummary?.estimatedFinalBytes ?? 0) }} final ·
+          {{ formatMemory(lastMapSummary?.estimatedPeakBytes ?? 0) }} peak
+        </p>
+        <button class="generation-primary-button" type="button" (click)="exploreMap()">Explore Map <span aria-hidden="true">→</span></button>
+      } @else {
+        <p class="generation-eyebrow">WORLD FORGE</p>
+        <h2 id="generation-card-title">Couldn’t create this world</h2>
+        <p class="generation-intro">{{ generationError }}</p>
+        <div class="generation-error-actions">
+          <button class="generation-primary-button" type="button" (click)="generateWorld()">Try Again <span aria-hidden="true">↻</span></button>
+          <button class="generation-secondary-button" type="button" (click)="editSettings()">Edit Settings</button>
+        </div>
+      }
+    </section>
+  </div>
+
+  <div class="preview-caption" aria-hidden="true">
+    <span class="caption-line"></span>
+    <span>MAP PREVIEW</span>
+  </div>
+</main>
