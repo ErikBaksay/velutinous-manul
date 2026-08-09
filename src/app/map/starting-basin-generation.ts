@@ -238,9 +238,9 @@ function collectResourceTargets(
   data: AuthoritativeMapData,
   navigation: NavigationGrid,
 ): Map<string, number[]> {
-  const targets = new Map<string, number[]>();
+  const targetSets = new Map<string, Set<number>>();
   for (const resourceKind of RESOURCE_KINDS) {
-    targets.set(resourceKind, []);
+    targetSets.set(resourceKind, new Set<number>());
   }
 
   for (let cellIndex = 0; cellIndex < MAP_CELL_COUNT; cellIndex += 1) {
@@ -250,7 +250,7 @@ function collectResourceTargets(
     }
     for (const resourceKind of RESOURCE_KINDS) {
       if (data.resourceIntensity[resourceKind][cellIndex] > 0) {
-        addUniqueTarget(targets.get(resourceKind)!, nodeIndex);
+        targetSets.get(resourceKind)!.add(nodeIndex);
       }
     }
   }
@@ -259,8 +259,13 @@ function collectResourceTargets(
     const resourceKind = deposit.kind;
     const nodeIndex = findNearestPassableNode(navigation, cellToCoarseNode(deposit.centerCell));
     if (nodeIndex !== null) {
-      addUniqueTarget(targets.get(resourceKind)!, nodeIndex);
+      targetSets.get(resourceKind)!.add(nodeIndex);
     }
+  }
+
+  const targets = new Map<string, number[]>();
+  for (const [resourceKind, nodes] of targetSets) {
+    targets.set(resourceKind, [...nodes]);
   }
   return targets;
 }
@@ -633,12 +638,6 @@ function findNearestPassableNode(
     }
   }
   return null;
-}
-
-function addUniqueTarget(targets: number[], nodeIndex: number): void {
-  if (!targets.includes(nodeIndex)) {
-    targets.push(nodeIndex);
-  }
 }
 
 function cellToCoarseNode(cellIndex: number): number {

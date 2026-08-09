@@ -5,6 +5,7 @@ import {
   MAP_CELL_COUNT,
   MAP_HEIGHT,
   MAP_WIDTH,
+  MAX_WATER_COVERAGE,
   RESOURCE_KINDS,
   AuthoritativeMapData,
 } from './map-types';
@@ -37,6 +38,16 @@ describe('water generation', () => {
     expect(totalWater / MAP_CELL_COUNT).toBeGreaterThan(0.21);
     expect(totalWater / MAP_CELL_COUNT).toBeLessThan(0.29);
     expect(result.oceanCellCount).toBeGreaterThan(0);
+  });
+
+  it('caps water coverage so a requested all-water map still leaves playable land', () => {
+    const data = createHeightOnlyData();
+    generateTerrainHeightSamples(DEFAULT_MAP_CONFIG, data.heightSamples);
+    const result = classifyOceanAndLakes(data, { ...DEFAULT_MAP_CONFIG, waterCoverage: 1 });
+    const totalWater = result.oceanCellCount + result.lakeCellCount;
+
+    expect(totalWater).toBeLessThan(MAP_CELL_COUNT);
+    expect(totalWater / MAP_CELL_COUNT).toBeLessThanOrEqual(MAX_WATER_COVERAGE + 0.02);
   });
 
   it('keeps enclosed submerged areas as lakes instead of oceans', () => {

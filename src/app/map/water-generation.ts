@@ -4,6 +4,7 @@ import {
   MAP_CELL_COUNT,
   MAP_HEIGHT,
   MAP_WIDTH,
+  MAX_WATER_COVERAGE,
   AuthoritativeMapData,
   MapConfig,
   WATER_KIND_CODES,
@@ -54,9 +55,10 @@ export function classifyOceanAndLakes(
   config: MapConfig,
 ): WaterGenerationResult {
   data.waterKind.fill(WATER_KIND_CODES.none);
-  const targetWaterCells = Math.round(
-    MAP_CELL_COUNT * Math.min(Math.max(config.waterCoverage, 0), 1),
-  );
+  const waterCoverage = Number.isFinite(config.waterCoverage)
+    ? Math.min(Math.max(config.waterCoverage, 0), MAX_WATER_COVERAGE)
+    : 0;
+  const targetWaterCells = Math.round(MAP_CELL_COUNT * waterCoverage);
   if (targetWaterCells === 0) {
     return { seaLevelSample: 0, oceanCellCount: 0, lakeCellCount: 0 };
   }

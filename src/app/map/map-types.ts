@@ -35,6 +35,8 @@ export const DEFAULT_MAP_CONFIG: Readonly<MapConfig> = Object.freeze({
   resourceAbundance: 0.6,
 });
 
+export const MAX_WATER_COVERAGE = 0.95;
+
 export type ResourceKind =
   | 'iron-ore'
   | 'copper-ore'

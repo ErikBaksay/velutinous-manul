@@ -1,6 +1,7 @@
 import {
   AuthoritativeMapData,
   DEFAULT_MAP_CONFIG,
+  MAX_WATER_COVERAGE,
   RESOURCE_KINDS,
 } from './map-types';
 import {
@@ -50,7 +51,7 @@ describe('map identity foundation', () => {
     });
 
     expect(normalized.seed).toBe(DEFAULT_MAP_CONFIG.seed);
-    expect(normalized.waterCoverage).toBe(1);
+    expect(normalized.waterCoverage).toBe(MAX_WATER_COVERAGE);
     expect(normalized.forestDensity).toBe(0);
   });
 

@@ -1,6 +1,7 @@
 import {
   DEFAULT_MAP_CONFIG,
   MAP_HEIGHT,
+  MAX_WATER_COVERAGE,
   MAP_PRESETS,
   MAP_WIDTH,
   MapConfig,
@@ -28,7 +29,9 @@ export function normalizeMapConfig(input: Partial<MapConfig> = {}): MapConfig {
     preset,
     width,
     height,
-    waterCoverage: quantizeControl(input.waterCoverage ?? DEFAULT_MAP_CONFIG.waterCoverage),
+    waterCoverage: quantizeControl(
+      Math.min(input.waterCoverage ?? DEFAULT_MAP_CONFIG.waterCoverage, MAX_WATER_COVERAGE),
+    ),
     terrainRoughness: quantizeControl(
       input.terrainRoughness ?? DEFAULT_MAP_CONFIG.terrainRoughness,
     ),

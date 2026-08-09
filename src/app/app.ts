@@ -1,8 +1,8 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
-import { GameScene } from './game-scene';
 import {
   DEFAULT_MAP_CONFIG,
   GenerationPhase,
+  MAX_WATER_COVERAGE,
   MapConfig,
   MapPreset,
   MapSummary,
@@ -59,8 +59,9 @@ export class App implements AfterViewInit, OnDestroy {
   @ViewChild('gameCanvas', { static: true })
   private readonly gameCanvas!: ElementRef<HTMLCanvasElement>;
 
-  private gameScene: GameScene | null = null;
+  private gameScene: import('./game-scene').GameScene | null = null;
   private readonly mapWorkerClient = new MapWorkerClient();
+  private isDestroyed = false;
   mapConfig: MapConfig = normalizeMapConfig(DEFAULT_MAP_CONFIG);
   isGenerating = true;
   generationError: string | null = null;
@@ -69,6 +70,7 @@ export class App implements AfterViewInit, OnDestroy {
   lastMapSummary: MapSummary | null = null;
 
   readonly generationMilestones = GENERATION_MILESTONES;
+  readonly maxWaterCoveragePercent = MAX_WATER_COVERAGE * 100;
 
   get controlsLocked(): boolean {
     return this.overlayState !== 'hidden';
@@ -79,8 +81,27 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit(): void {
-    this.gameScene = new GameScene(this.gameCanvas.nativeElement, this.sceneFrame.nativeElement);
-    this.startGeneration();
+    void import('./game-scene')
+      .then(({ GameScene }) => {
+        if (this.isDestroyed) {
+          return;
+        }
+        this.gameScene = new GameScene(
+          this.gameCanvas.nativeElement,
+          this.sceneFrame.nativeElement,
+        );
+        this.startGeneration();
+      })
+      .catch((error: unknown) => {
+        if (this.isDestroyed) {
+          return;
+        }
+        this.isGenerating = false;
+        this.overlayState = 'error';
+        this.generationError =
+          'The 3D map preview could not initialize in this browser. Try reloading or using a browser with WebGL support.';
+        console.error('[scene] initialization failed', error);
+      });
   }
 
   generateWorld(): void {
@@ -225,6 +246,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.isDestroyed = true;
     this.mapWorkerClient.dispose();
     this.gameScene?.destroy();
   }

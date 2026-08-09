@@ -53,4 +53,3 @@ If the user asks whether staged changes are ready to be committed or pushed, rep
 ## Current project state
 
 The repository started empty. The first responsibility is to establish a minimal, inspectable browser/Three.js foundation. No production systems or visual asset library should be created until the first camera and scene direction has been selected and manually reviewed.
-

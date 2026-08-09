@@ -69,7 +69,7 @@
       <div class="setting-list">
         <div class="setting-row">
           <div class="setting-label"><span>Water coverage</span><output>{{ formatPercent(mapConfig.waterCoverage) }}</output></div>
-          <input type="range" min="0" max="100" [value]="mapConfig.waterCoverage * 100" [disabled]="controlsLocked" aria-label="Water coverage" (input)="updateSetting('waterCoverage', $event)" />
+          <input type="range" min="0" [max]="maxWaterCoveragePercent" [value]="mapConfig.waterCoverage * 100" [disabled]="controlsLocked" aria-label="Water coverage" (input)="updateSetting('waterCoverage', $event)" />
         </div>
         <div class="setting-row">
           <div class="setting-label"><span>Terrain roughness</span><output>{{ formatPercent(mapConfig.terrainRoughness) }}</output></div>

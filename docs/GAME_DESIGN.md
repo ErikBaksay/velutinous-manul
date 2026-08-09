@@ -238,4 +238,3 @@ This is a scope direction, not an immediate implementation checklist.
 Do not begin with dozens of resources, dozens of buildings, a large asset library, sophisticated world generation, an enormous map, advanced traffic simulation, individual citizens, complex economics, railways, multiplayer, backend accounts, cloud saving, weather, seasons, elaborate pollution, a campaign, mobile controls, modding, or advanced PWA functionality.
 
 Those may be revisited only when the current development stage genuinely requires them.
-
