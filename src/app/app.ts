@@ -90,6 +90,7 @@ export class App implements AfterViewInit, OnDestroy {
           this.gameCanvas.nativeElement,
           this.sceneFrame.nativeElement,
         );
+        this.gameScene.setNavigationEnabled(false);
         this.startGeneration();
       })
       .catch((error: unknown) => {
@@ -113,6 +114,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private startGeneration(): void {
+    this.gameScene?.setNavigationEnabled(false);
     this.isGenerating = true;
     this.generationError = null;
     this.overlayState = 'generating';
@@ -128,19 +130,42 @@ export class App implements AfterViewInit, OnDestroy {
         console.debug('[map worker]', message.detail);
       },
       onComplete: (message) => {
-        this.isGenerating = false;
         this.generationError = null;
         this.generationProgress = {
           phase: 'complete',
           progress: 1,
-          detail: 'Your world is ready to explore.',
+          detail: 'Preparing the starting view.',
         };
         this.lastMapSummary = message.summary;
-        this.overlayState = 'complete';
-        this.gameScene?.setMapData(message.data, message.summary.seaLevelSample);
-        console.info('[map worker] Gate 6.3 world generated', {
-          summary: message.summary,
-          heightRange: getHeightRange(message.data.heightSamples),
+        const initialReady = this.gameScene?.setMapData(
+          message.data,
+          message.summary.seaLevelSample,
+          message.summary.startingCell,
+        ) ?? Promise.resolve();
+        void initialReady.then(() => {
+          if (this.isDestroyed) {
+            return;
+          }
+          this.isGenerating = false;
+          this.generationProgress = {
+            phase: 'complete',
+            progress: 1,
+            detail: 'Your world is ready to explore.',
+          };
+          this.overlayState = 'complete';
+          console.info('[map worker] Gate 6.3 world generated', {
+            summary: message.summary,
+            heightRange: getHeightRange(message.data.heightSamples),
+          });
+        }).catch((error: unknown) => {
+          if (this.isDestroyed) {
+            return;
+          }
+          this.isGenerating = false;
+          this.overlayState = 'error';
+          this.generationError =
+            'The world was generated, but the starting view could not be prepared. Try generating it again.';
+          console.error('[chunk streaming] initial view preparation failed', error);
         });
       },
       onError: (message) => {
@@ -156,12 +181,14 @@ export class App implements AfterViewInit, OnDestroy {
   exploreMap(): void {
     if (this.overlayState === 'complete') {
       this.overlayState = 'hidden';
+      this.gameScene?.setNavigationEnabled(true);
     }
   }
 
   editSettings(): void {
     if (this.overlayState === 'error') {
       this.overlayState = 'hidden';
+      this.gameScene?.setNavigationEnabled(true);
     }
   }
 

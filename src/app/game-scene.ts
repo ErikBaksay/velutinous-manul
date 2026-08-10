@@ -1,20 +1,29 @@
 import * as THREE from 'three';
-import { AuthoritativeMapData } from './map/map-types';
-import { ForestChunkRenderer } from './forest-chunk-renderer';
-import { DepositChunkRenderer } from './deposit-chunk-renderer';
-import { TerrainChunkRenderer } from './terrain-chunk-renderer';
-import { WaterChunkRenderer } from './water-chunk-renderer';
+import { MAP_HEIGHT, MAP_WIDTH, AuthoritativeMapData } from './map/map-types';
+import { TERRAIN_VERTICAL_SCALE } from './map/terrain-generation';
+import {
+  BASE_CAMERA_VIEW_HEIGHT,
+  CAMERA_NAVIGATION_PLANE_Y,
+  CameraController,
+} from './camera-controller';
+import { ChunkDebugVisualizer } from './chunk-debug-visualizer';
+import { ChunkStreamingManager } from './chunk-streaming-manager';
+
+const CAMERA_ORBIT_RADIUS = Math.sqrt(90 ** 2 + 90 ** 2 + 90 ** 2);
+const CAMERA_FAR_PLANE = Math.ceil(
+  Math.hypot(MAP_WIDTH, MAP_HEIGHT) + CAMERA_ORBIT_RADIUS + TERRAIN_VERTICAL_SCALE + 16,
+);
 
 export class GameScene {
   private readonly scene = new THREE.Scene();
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera: THREE.OrthographicCamera;
+  private readonly cameraController: CameraController;
+  private readonly chunkStreamingManager: ChunkStreamingManager;
+  private readonly chunkDebugVisualizer: ChunkDebugVisualizer | null;
   private readonly resizeObserver: ResizeObserver;
-  private forestChunkRenderer: ForestChunkRenderer | null = null;
-  private depositChunkRenderer: DepositChunkRenderer | null = null;
-  private terrainChunkRenderer: TerrainChunkRenderer | null = null;
-  private waterChunkRenderer: WaterChunkRenderer | null = null;
   private frameHandle = 0;
+  private previousFrameTime = performance.now();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -29,9 +38,14 @@ export class GameScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.92;
 
-    this.camera = new THREE.OrthographicCamera(-40, 40, 40, -40, 0.1, 500);
+    this.camera = new THREE.OrthographicCamera(-40, 40, 40, -40, 0.1, CAMERA_FAR_PLANE);
     this.camera.position.set(90, 108, 90);
-    this.camera.lookAt(0, 18, 0);
+    this.camera.lookAt(0, CAMERA_NAVIGATION_PLANE_Y, 0);
+    this.cameraController = new CameraController(this.camera, canvas);
+    this.chunkStreamingManager = new ChunkStreamingManager(this.scene);
+    this.chunkDebugVisualizer = isChunkDebugEnabled()
+      ? new ChunkDebugVisualizer(this.scene, host)
+      : null;
 
     this.scene.background = new THREE.Color(0x59636c);
     this.scene.fog = new THREE.Fog(0x59636c, 260, 500);
@@ -46,15 +60,10 @@ export class GameScene {
 
   destroy(): void {
     cancelAnimationFrame(this.frameHandle);
+    this.cameraController.dispose();
+    this.chunkStreamingManager.destroy();
+    this.chunkDebugVisualizer?.dispose();
     this.resizeObserver.disconnect();
-    this.forestChunkRenderer?.destroy();
-    this.forestChunkRenderer = null;
-    this.depositChunkRenderer?.destroy();
-    this.depositChunkRenderer = null;
-    this.waterChunkRenderer?.destroy();
-    this.waterChunkRenderer = null;
-    this.terrainChunkRenderer?.destroy();
-    this.terrainChunkRenderer = null;
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
         return;
@@ -70,19 +79,44 @@ export class GameScene {
     this.renderer.dispose();
   }
 
-  setMapData(data: AuthoritativeMapData, seaLevelSample: number): void {
-    this.forestChunkRenderer?.destroy();
-    this.depositChunkRenderer?.destroy();
-    this.waterChunkRenderer?.destroy();
-    this.terrainChunkRenderer?.destroy();
-    this.terrainChunkRenderer = new TerrainChunkRenderer(this.scene, data);
-    this.waterChunkRenderer = new WaterChunkRenderer(this.scene, data, seaLevelSample);
-    this.forestChunkRenderer = new ForestChunkRenderer(this.scene, data);
-    this.depositChunkRenderer = new DepositChunkRenderer(this.scene, data);
+  setMapData(
+    data: AuthoritativeMapData,
+    seaLevelSample: number,
+    startingCell?: number,
+  ): Promise<void> {
+    this.chunkStreamingManager.beginMap(data, seaLevelSample);
+
+    if (startingCell === undefined) {
+      this.cameraController.reset(0, 0);
+      return this.chunkStreamingManager.beginInitialView(this.camera);
+    }
+
+    const cellX = startingCell % MAP_WIDTH;
+    const cellY = Math.floor(startingCell / MAP_WIDTH);
+    this.cameraController.reset(
+      cellX - MAP_WIDTH / 2 + 0.5,
+      cellY - MAP_HEIGHT / 2 + 0.5,
+    );
+    return this.chunkStreamingManager.beginInitialView(this.camera);
+  }
+
+  setNavigationEnabled(enabled: boolean): void {
+    this.cameraController.setNavigationEnabled(enabled);
   }
 
   private readonly render = (): void => {
     this.frameHandle = requestAnimationFrame(this.render);
+    const now = performance.now();
+    this.cameraController.update((now - this.previousFrameTime) / 1_000);
+    this.previousFrameTime = now;
+    this.chunkStreamingManager.update(this.camera);
+    const currentSelection = this.chunkStreamingManager.getCurrentSelection();
+    if (this.chunkDebugVisualizer && currentSelection) {
+      this.chunkDebugVisualizer.update(
+        currentSelection,
+        this.chunkStreamingManager.getDiagnostics(),
+      );
+    }
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -90,7 +124,7 @@ export class GameScene {
     const width = Math.max(this.host.clientWidth, 1);
     const height = Math.max(this.host.clientHeight, 1);
     const aspect = width / height;
-    const viewHeight = 128;
+    const viewHeight = BASE_CAMERA_VIEW_HEIGHT;
 
     this.camera.left = (-viewHeight * aspect) / 2;
     this.camera.right = (viewHeight * aspect) / 2;
@@ -115,4 +149,9 @@ export class GameScene {
     this.scene.add(coolFill);
   }
 
+}
+
+function isChunkDebugEnabled(): boolean {
+  return typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('debug') === 'chunks';
 }

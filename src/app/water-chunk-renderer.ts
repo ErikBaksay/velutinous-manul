@@ -6,9 +6,11 @@ import {
   WATER_KIND_CODES,
 } from './map/map-types';
 import { TERRAIN_VERTICAL_SCALE } from './map/terrain-generation';
-import { ACTIVE_CHUNK_RADIUS, TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
-
-const CHUNKS_PER_SIDE = MAP_WIDTH / TERRAIN_CHUNK_SIZE;
+import {
+  ChunkCoordinate,
+  createActiveChunkCoordinates,
+  TERRAIN_CHUNK_SIZE,
+} from './terrain-chunk-renderer';
 
 export class WaterChunkRenderer {
   private readonly group = new THREE.Group();
@@ -18,44 +20,74 @@ export class WaterChunkRenderer {
     opacity: 0.78,
     depthWrite: false,
   });
-  private readonly chunks: THREE.Mesh[] = [];
+  private readonly chunks = new Map<string, THREE.Mesh>();
+  private readonly data: AuthoritativeMapData;
+  private readonly seaLevelWorld: number;
 
-  constructor(scene: THREE.Scene, data: AuthoritativeMapData, seaLevelSample: number) {
+  constructor(
+    scene: THREE.Scene,
+    data: AuthoritativeMapData,
+    seaLevelSample: number,
+    initialChunks: readonly ChunkCoordinate[] = createActiveChunkCoordinates(),
+  ) {
     this.group.name = 'water-chunks';
-    const seaLevelWorld = (seaLevelSample / 65_535) * TERRAIN_VERTICAL_SCALE + 0.08;
-    this.buildActiveChunks(data, seaLevelWorld);
+    this.data = data;
+    this.seaLevelWorld = (seaLevelSample / 65_535) * TERRAIN_VERTICAL_SCALE + 0.08;
+    for (const chunk of initialChunks) {
+      const waterChunk = this.createChunk(chunk.x, chunk.y);
+      if (waterChunk) {
+        this.attachChunk(chunk.x, chunk.y, waterChunk);
+      }
+    }
     scene.add(this.group);
   }
 
   destroy(): void {
     this.group.removeFromParent();
-    for (const chunk of this.chunks) {
+    for (const chunk of this.chunks.values()) {
       chunk.geometry.dispose();
     }
     this.material.dispose();
-    this.chunks.length = 0;
+    this.chunks.clear();
   }
 
-  private buildActiveChunks(data: AuthoritativeMapData, seaLevelWorld: number): void {
-    const centerChunk = Math.floor(CHUNKS_PER_SIDE / 2);
-    const minimumChunk = Math.max(0, centerChunk - ACTIVE_CHUNK_RADIUS);
-    const maximumChunk = Math.min(CHUNKS_PER_SIDE - 1, centerChunk + ACTIVE_CHUNK_RADIUS);
-
-    for (let chunkY = minimumChunk; chunkY <= maximumChunk; chunkY += 1) {
-      for (let chunkX = minimumChunk; chunkX <= maximumChunk; chunkX += 1) {
-        const geometry = createWaterChunkGeometry(data, chunkX, chunkY, seaLevelWorld);
-        if (geometry.getAttribute('position').count === 0) {
-          geometry.dispose();
-          continue;
-        }
-
-        const chunk = new THREE.Mesh(geometry, this.material);
-        chunk.name = `water-chunk-${chunkX}-${chunkY}`;
-        chunk.renderOrder = 2;
-        this.group.add(chunk);
-        this.chunks.push(chunk);
-      }
+  createChunk(chunkX: number, chunkY: number): THREE.Mesh | null {
+    const geometry = createWaterChunkGeometry(this.data, chunkX, chunkY, this.seaLevelWorld);
+    if (geometry.getAttribute('position').count === 0) {
+      geometry.dispose();
+      return null;
     }
+
+    const chunk = new THREE.Mesh(geometry, this.material);
+    chunk.name = `water-chunk-${chunkX}-${chunkY}`;
+    chunk.renderOrder = 2;
+    return chunk;
+  }
+
+  attachChunk(chunkX: number, chunkY: number, chunk: THREE.Mesh): void {
+    const key = `${chunkX}:${chunkY}`;
+    this.group.add(chunk);
+    this.chunks.set(key, chunk);
+  }
+
+  removeChunk(chunkX: number, chunkY: number): void {
+    const key = `${chunkX}:${chunkY}`;
+    const chunk = this.chunks.get(key);
+    if (!chunk) {
+      return;
+    }
+
+    chunk.removeFromParent();
+    chunk.geometry.dispose();
+    this.chunks.delete(key);
+  }
+
+  disposeChunk(chunk: THREE.Mesh): void {
+    chunk.geometry.dispose();
+  }
+
+  getAttachedCount(): number {
+    return this.chunks.size;
   }
 }
 

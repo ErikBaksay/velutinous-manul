@@ -18,6 +18,11 @@ canvas {
   height: 100%;
 }
 
+canvas:focus-visible {
+  outline: 2px solid rgba(224, 164, 112, 0.8);
+  outline-offset: -2px;
+}
+
 .creation-dock {
   position: absolute;
   inset: 24px auto 24px 24px;

@@ -7,9 +7,12 @@ import {
   WATER_KIND_CODES,
 } from './map/map-types';
 import { sampleHeight } from './terrain-chunk-renderer';
-import { ACTIVE_CHUNK_RADIUS, TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
+import {
+  ChunkCoordinate,
+  createActiveChunkCoordinates,
+  TERRAIN_CHUNK_SIZE,
+} from './terrain-chunk-renderer';
 
-const CHUNKS_PER_SIDE = MAP_WIDTH / TERRAIN_CHUNK_SIZE;
 const TREE_PLACEMENT_CHANCE = 0.28;
 
 export class ForestChunkRenderer {
@@ -20,11 +23,22 @@ export class ForestChunkRenderer {
     roughness: 0.96,
     metalness: 0,
   });
-  private readonly chunks: THREE.InstancedMesh[] = [];
+  private readonly chunks = new Map<string, THREE.InstancedMesh>();
+  private readonly data: AuthoritativeMapData;
 
-  constructor(scene: THREE.Scene, data: AuthoritativeMapData) {
+  constructor(
+    scene: THREE.Scene,
+    data: AuthoritativeMapData,
+    initialChunks: readonly ChunkCoordinate[] = createActiveChunkCoordinates(),
+  ) {
     this.group.name = 'forest-chunks';
-    this.buildActiveChunks(data);
+    this.data = data;
+    for (const chunk of initialChunks) {
+      const forest = this.createChunk(chunk.x, chunk.y);
+      if (forest) {
+        this.attachChunk(chunk.x, chunk.y, forest);
+      }
+    }
     scene.add(this.group);
   }
 
@@ -32,32 +46,48 @@ export class ForestChunkRenderer {
     this.group.removeFromParent();
     this.treeGeometry.dispose();
     this.treeMaterial.dispose();
-    this.chunks.length = 0;
+    this.chunks.clear();
   }
 
-  private buildActiveChunks(data: AuthoritativeMapData): void {
-    const centerChunk = Math.floor(CHUNKS_PER_SIDE / 2);
-    const minimumChunk = Math.max(0, centerChunk - ACTIVE_CHUNK_RADIUS);
-    const maximumChunk = Math.min(CHUNKS_PER_SIDE - 1, centerChunk + ACTIVE_CHUNK_RADIUS);
-
-    for (let chunkY = minimumChunk; chunkY <= maximumChunk; chunkY += 1) {
-      for (let chunkX = minimumChunk; chunkX <= maximumChunk; chunkX += 1) {
-        const instanceCount = countForestCandidates(data, chunkX, chunkY);
-        if (instanceCount === 0) {
-          continue;
-        }
-
-        const forest = new THREE.InstancedMesh(
-          this.treeGeometry,
-          this.treeMaterial,
-          instanceCount,
-        );
-        forest.name = `forest-chunk-${chunkX}-${chunkY}`;
-        placeForestInstances(data, forest, chunkX, chunkY);
-        this.group.add(forest);
-        this.chunks.push(forest);
-      }
+  createChunk(chunkX: number, chunkY: number): THREE.InstancedMesh | null {
+    const instanceCount = countForestCandidates(this.data, chunkX, chunkY);
+    if (instanceCount === 0) {
+      return null;
     }
+
+    const forest = new THREE.InstancedMesh(
+      this.treeGeometry,
+      this.treeMaterial,
+      instanceCount,
+    );
+    forest.name = `forest-chunk-${chunkX}-${chunkY}`;
+    placeForestInstances(this.data, forest, chunkX, chunkY);
+    return forest;
+  }
+
+  attachChunk(chunkX: number, chunkY: number, forest: THREE.InstancedMesh): void {
+    const key = `${chunkX}:${chunkY}`;
+    this.group.add(forest);
+    this.chunks.set(key, forest);
+  }
+
+  removeChunk(chunkX: number, chunkY: number): void {
+    const key = `${chunkX}:${chunkY}`;
+    const forest = this.chunks.get(key);
+    if (!forest) {
+      return;
+    }
+
+    forest.removeFromParent();
+    this.chunks.delete(key);
+  }
+
+  disposeChunk(forest: THREE.InstancedMesh): void {
+    forest.removeFromParent();
+  }
+
+  getAttachedCount(): number {
+    return this.chunks.size;
   }
 }
 

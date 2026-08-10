@@ -6,7 +6,12 @@ import {
   DepositSource,
 } from './map/map-types';
 import { sampleHeight } from './terrain-chunk-renderer';
-import { ACTIVE_CHUNK_RADIUS, TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
+import {
+  ACTIVE_CHUNK_RADIUS,
+  ChunkCoordinate,
+  createActiveChunkCoordinates,
+  TERRAIN_CHUNK_SIZE,
+} from './terrain-chunk-renderer';
 
 const CHUNKS_PER_SIDE = MAP_WIDTH / TERRAIN_CHUNK_SIZE;
 const ROCKS_PER_DEPOSIT = 3;
@@ -24,12 +29,19 @@ export class DepositChunkRenderer {
   private readonly rockMaterials = new Map<DepositSource['kind'], THREE.MeshStandardMaterial>();
   private readonly ringGeometry = new THREE.RingGeometry(0.72, 0.84, 20);
   private readonly ringMaterials = new Map<DepositSource['kind'], THREE.MeshBasicMaterial>();
-  private readonly rockMeshes: THREE.InstancedMesh[] = [];
-  private readonly markerRings: THREE.Mesh[] = [];
+  private readonly chunks = new Map<string, DepositChunkObjects>();
+  private readonly data: AuthoritativeMapData;
 
-  constructor(scene: THREE.Scene, data: AuthoritativeMapData) {
+  constructor(
+    scene: THREE.Scene,
+    data: AuthoritativeMapData,
+    initialChunks: readonly ChunkCoordinate[] = createActiveChunkCoordinates(),
+  ) {
     this.group.name = 'deposit-outcrops';
-    this.buildActiveDeposits(data);
+    this.data = data;
+    for (const chunk of initialChunks) {
+      this.attachChunk(chunk.x, chunk.y, this.createChunk(chunk.x, chunk.y));
+    }
     scene.add(this.group);
   }
 
@@ -43,17 +55,19 @@ export class DepositChunkRenderer {
     for (const material of this.ringMaterials.values()) {
       material.dispose();
     }
-    this.rockMeshes.length = 0;
-    this.markerRings.length = 0;
+    this.chunks.clear();
     this.rockMaterials.clear();
     this.ringMaterials.clear();
   }
 
-  private buildActiveDeposits(data: AuthoritativeMapData): void {
-    const activeDeposits = data.deposits.filter((deposit) => isActiveDeposit(deposit));
+  createChunk(chunkX: number, chunkY: number): DepositChunkObjects {
+    const deposits = this.data.deposits.filter((deposit) => isDepositInChunk(deposit, chunkX, chunkY));
+    const rockMeshes: THREE.InstancedMesh[] = [];
+    const markerRings: THREE.Mesh[] = [];
+
     for (const kind of Object.keys(OUTCROP_COLORS) as DepositSource['kind'][]) {
-      const deposits = activeDeposits.filter((deposit) => deposit.kind === kind);
-      if (deposits.length === 0) {
+      const kindDeposits = deposits.filter((deposit) => deposit.kind === kind);
+      if (kindDeposits.length === 0) {
         continue;
       }
 
@@ -61,20 +75,52 @@ export class DepositChunkRenderer {
       const rocks = new THREE.InstancedMesh(
         this.rockGeometry,
         rockMaterial,
-        deposits.length * ROCKS_PER_DEPOSIT,
+        kindDeposits.length * ROCKS_PER_DEPOSIT,
       );
       rocks.name = `deposit-outcrops-${kind}`;
-      placeOutcropInstances(data, deposits, rocks);
-      this.group.add(rocks);
-      this.rockMeshes.push(rocks);
+      placeOutcropInstances(this.data, kindDeposits, rocks);
+      rockMeshes.push(rocks);
 
       const ringMaterial = this.getRingMaterial(kind);
-      for (const deposit of deposits) {
-        const ring = createMarkerRing(data, deposit, this.ringGeometry, ringMaterial);
-        this.group.add(ring);
-        this.markerRings.push(ring);
+      for (const deposit of kindDeposits) {
+        markerRings.push(createMarkerRing(this.data, deposit, this.ringGeometry, ringMaterial));
       }
     }
+    return { rockMeshes, markerRings };
+  }
+
+  attachChunk(chunkX: number, chunkY: number, objects: DepositChunkObjects): void {
+    const key = `${chunkX}:${chunkY}`;
+    for (const rockMesh of objects.rockMeshes) {
+      this.group.add(rockMesh);
+    }
+    for (const markerRing of objects.markerRings) {
+      this.group.add(markerRing);
+    }
+    this.chunks.set(key, objects);
+  }
+
+  removeChunk(chunkX: number, chunkY: number): void {
+    const key = `${chunkX}:${chunkY}`;
+    const objects = this.chunks.get(key);
+    if (!objects) {
+      return;
+    }
+
+    for (const object of [...objects.rockMeshes, ...objects.markerRings]) {
+      object.removeFromParent();
+    }
+    this.chunks.delete(key);
+  }
+
+  disposeChunk(objects: DepositChunkObjects): void {
+    for (const object of [...objects.rockMeshes, ...objects.markerRings]) {
+      object.removeFromParent();
+    }
+  }
+
+  getAttachedCount(): number {
+    return this.chunks.size;
   }
 
   private getRockMaterial(kind: DepositSource['kind']): THREE.MeshStandardMaterial {
@@ -108,6 +154,11 @@ export class DepositChunkRenderer {
 
 export function countActiveDeposits(data: AuthoritativeMapData): number {
   return data.deposits.filter((deposit) => isActiveDeposit(deposit)).length;
+}
+
+export interface DepositChunkObjects {
+  readonly rockMeshes: readonly THREE.InstancedMesh[];
+  readonly markerRings: readonly THREE.Mesh[];
 }
 
 function placeOutcropInstances(
@@ -202,10 +253,15 @@ function isActiveDeposit(deposit: DepositSource): boolean {
   const chunkX = Math.floor(centerX / TERRAIN_CHUNK_SIZE);
   const chunkY = Math.floor(centerY / TERRAIN_CHUNK_SIZE);
   const centerChunk = Math.floor(CHUNKS_PER_SIDE / 2);
-  return (
-    Math.abs(chunkX - centerChunk) <= ACTIVE_CHUNK_RADIUS &&
-    Math.abs(chunkY - centerChunk) <= ACTIVE_CHUNK_RADIUS
-  );
+  return Math.abs(chunkX - centerChunk) <= ACTIVE_CHUNK_RADIUS &&
+    Math.abs(chunkY - centerChunk) <= ACTIVE_CHUNK_RADIUS;
+}
+
+function isDepositInChunk(deposit: DepositSource, chunkX: number, chunkY: number): boolean {
+  const centerX = deposit.centerCell % MAP_WIDTH;
+  const centerY = Math.floor(deposit.centerCell / MAP_WIDTH);
+  return Math.floor(centerX / TERRAIN_CHUNK_SIZE) === chunkX &&
+    Math.floor(centerY / TERRAIN_CHUNK_SIZE) === chunkY;
 }
 
 function hashDeposit(depositId: number, variationIndex: number): number {

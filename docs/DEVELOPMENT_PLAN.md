@@ -11,10 +11,10 @@ Every implementation milestone is small enough to run and manually test. Work pa
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
 - **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3.
 - **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented.
-- **Current task:** Manual review of Map Generation v1 Gate 6.3 — generation progress, completion summary, and regeneration feedback.
-- **Next planned work:** After approval, define the next incremental map-generation or browser-foundation milestone.
+- **Current task:** Manual review of streaming budget and prioritization tuning Gate 3.2.
+- **Next planned work:** After approval, add budget hysteresis and repeated-sweep resource stabilization before moving to construction interaction.
 - **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, saving, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
-- **Known limitations / technical debt:** The map still renders only an active central set of chunks while camera streaming is deferred. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Karma cannot execute browser specs in this environment because no Chrome binary is installed, although the specs compile successfully.
+- **Known limitations / technical debt:** The map still renders only an active central set of chunks while camera streaming is deferred. The previously observed shallow-angle world cutoff is intentionally deferred for a later camera/streaming discussion. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Karma cannot execute browser specs in this environment because no Chrome binary is installed, although the specs compile successfully.
 
 ## Delivery and approval gates
 
@@ -376,3 +376,38 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added overlay presentation and formatting specifications; raised the component-style budget to accommodate the approved visual treatment.
 - `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, and `npx tsc -p tsconfig.spec.json --noEmit` pass.
 - No files were staged or committed.
+
+### 2026-08-10 — Camera navigation baseline and streaming Gate 2
+
+- Preserved the approved camera-navigation implementation with WASD/arrows, middle-button orbit, right-button pan, orthographic zoom, fixed navigation-plane Y, and overlay input locking.
+- Intentionally deferred the previously observed shallow-angle world cutoff instead of adding temporary angle or zoom restrictions.
+- Added conservative frustum-to-terrain-slab chunk selection that scans only the projected candidate area and tests chunk bounds including elevated decorative content.
+- Added one logical prefetch ring, the initial desired-chunk tuning value of 576, visible/prefetch/desired/rejected classification, and budget-pressure reporting without attaching or evicting chunks yet.
+- Added opt-in development diagnostics at `?debug=chunks`, including chunk-bound visualization, visible/peak counts, candidate counts, static attached count, budget state, and map epoch.
+- Kept the current central static renderers, deterministic generation, World Forge overlay, and renderer ownership unchanged.
+- `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, `npx tsc -p tsconfig.spec.json --noEmit`, and `git diff --check` pass. Karma builds the test bundle but remains unable to bind port 9876 in this environment.
+- No files were staged, committed, or pushed by the assistant.
+
+### 2026-08-10 — Streaming Gate 3.1: atomic chunk bundles
+
+- Replaced the GameScene-owned fixed central render session with a chunk streaming coordinator that queues logical chunks from the frustum selection and attaches complete terrain/water/forest/deposit bundles incrementally.
+- Preserved shared layer materials and geometries while making per-chunk geometry and objects removable without disposing resources still used by neighboring chunks.
+- Added explicit `absent → queued → building → ready → attached → retiring → disposed` lifecycle states, map-epoch checks, desired-set attachment validation, and cancellation of queued work that is no longer desired.
+- Treated the 4 ms value as a scheduler target: synchronous bundle construction is allowed to finish, and actual last/rolling build times are reported.
+- Prioritized visible chunks ahead of prefetch, kept optional empty layers complete, and made the World Forge completion card wait for the default reset view’s visible chunks.
+- Kept map generation deterministic and retained the existing overlay; the previously observed camera/world cutoff remains intentionally deferred.
+- Added streaming lifecycle specifications for initial readiness and map-epoch replacement.
+- `npm run build`, both TypeScript checks, and `git diff --check` pass. Karma builds the complete test bundle but remains unable to bind port 9876 in this environment.
+- Manual browser review approved the streaming behavior. The preexisting shallow-angle chunk disappearance remains intentionally deferred for a later camera/frustum investigation.
+- No files were staged, committed, or pushed by the assistant.
+
+### 2026-08-10 — Streaming Gate 3.2: budget survey and prioritization
+
+- Added a development-only survey of 2,700 representative camera cases across 16:9, 4:3, square, 2:1, and 2.4:1 viewports; minimum, default, and maximum view heights; five elevations; four headings; and center, edge, and corner targets.
+- Kept `INITIAL_DESIRED_CHUNK_BUDGET = 576` as a provisional tuning value until the browser survey confirms whether it is comfortably sufficient.
+- Sorted visible and prefetch queues by distance from the camera’s fixed navigation target so nearby visible chunks are built first.
+- Exposed survey peak visible, desired, and candidate counts in the `?debug=chunks` diagnostics without changing camera limits or enforcing a new cap.
+- Added a regression specification that confirms visible chunk priority is target-centered.
+- The shallow-angle chunk disappearance remains intentionally deferred.
+- `npm run build`, both TypeScript checks, and `git diff --check` pass. Karma remains environment-blocked at port 9876.
+- No files were staged, committed, or pushed by the assistant.
