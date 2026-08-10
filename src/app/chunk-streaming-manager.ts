@@ -7,6 +7,7 @@ import {
   LogicalChunkCoordinate,
   selectChunksForView,
 } from './chunk-visibility';
+import { CameraNavigationState } from './camera-controller';
 import {
   DepositChunkObjects,
   DepositChunkRenderer,
@@ -17,6 +18,7 @@ import { TerrainChunkRenderer } from './terrain-chunk-renderer';
 import { WaterChunkRenderer } from './water-chunk-renderer';
 
 export const STREAMING_BUILD_BUDGET_MS = 4;
+const MAX_RETAINED_CHUNKS = INITIAL_DESIRED_CHUNK_BUDGET;
 
 export type ChunkLifecycleState =
   | 'absent'
@@ -30,6 +32,7 @@ export type ChunkLifecycleState =
 export interface ChunkStreamingDiagnostics {
   readonly mapEpoch: number;
   readonly attachedCount: number;
+  readonly attachedKeys: readonly string[];
   readonly retainedCount: number;
   readonly queuedCount: number;
   readonly inFlightCount: number;
@@ -39,6 +42,7 @@ export interface ChunkStreamingDiagnostics {
   readonly initialReady: boolean;
   readonly buildBudgetMs: number;
   readonly initialDesiredBudget: number;
+  readonly selectionRevision: number;
 }
 
 interface ChunkBundle {
@@ -54,6 +58,7 @@ interface ChunkRecord {
   readonly coordinate: LogicalChunkCoordinate;
   state: ChunkLifecycleState;
   bundle?: ChunkBundle;
+  retainedSinceRevision?: number;
 }
 
 interface QueueEntry {
@@ -74,6 +79,7 @@ export class ChunkStreamingManager {
   private initialVisibleKeys = new Set<string>();
   private currentSelection: ChunkViewSelection | null = null;
   private selectionSignature = '';
+  private lastCameraViewSignature = '';
   private viewRevision = 0;
   private mapEpoch = 0;
   private hasMapData = false;
@@ -98,6 +104,7 @@ export class ChunkStreamingManager {
     this.initialVisibleKeys.clear();
     this.currentSelection = null;
     this.selectionSignature = '';
+    this.lastCameraViewSignature = '';
     this.viewRevision = 0;
     this.initialReady = false;
     this.hasMapData = true;
@@ -110,34 +117,43 @@ export class ChunkStreamingManager {
     this.depositRenderer = new DepositChunkRenderer(this.scene, data, []);
   }
 
-  beginInitialView(camera: THREE.OrthographicCamera): Promise<void> {
+  beginInitialView(
+    camera: THREE.OrthographicCamera,
+    navigationState?: CameraNavigationState,
+  ): Promise<void> {
     if (!this.hasMapData) {
       return Promise.resolve();
     }
 
-    const selection = selectChunksForView(camera);
+    const selection = selectChunksForView(camera, undefined, undefined, undefined, navigationState);
     this.initialVisibleKeys = new Set(selection.visible.map(chunkKey));
     this.applySelection(selection);
+    this.lastCameraViewSignature = createCameraViewSignature(camera, navigationState);
     this.resolveInitialReadiness();
     return this.initialReadyPromise;
   }
 
-  update(camera: THREE.OrthographicCamera): void {
+  update(camera: THREE.OrthographicCamera, navigationState?: CameraNavigationState): void {
     if (!this.hasMapData) {
       return;
     }
 
-    const selection = selectChunksForView(camera);
-    const nextSignature = createChunkSelectionSignature(selection);
-    if (nextSignature !== this.selectionSignature) {
-      this.viewRevision += 1;
-      this.applySelection(selection);
+    const cameraViewSignature = createCameraViewSignature(camera, navigationState);
+    if (cameraViewSignature !== this.lastCameraViewSignature) {
+      const selection = selectChunksForView(camera, undefined, undefined, undefined, navigationState);
+      const nextSignature = createChunkSelectionSignature(selection);
+      if (nextSignature !== this.selectionSignature) {
+        this.viewRevision += 1;
+        this.applySelection(selection);
+      }
+      this.lastCameraViewSignature = cameraViewSignature;
     }
 
     const frameStart = performance.now();
     while (this.queue.length > 0 && performance.now() - frameStart < STREAMING_BUILD_BUDGET_MS) {
       this.buildNextBundle();
     }
+    this.retireStaleRecordsIfSafe();
     this.resolveInitialReadiness();
   }
 
@@ -147,19 +163,28 @@ export class ChunkStreamingManager {
 
   getDiagnostics(): ChunkStreamingDiagnostics {
     let attachedCount = 0;
+    let retainedCount = 0;
     let queuedCount = 0;
+    const attachedKeys: string[] = [];
     for (const record of this.records.values()) {
       if (record.state === 'attached') {
         attachedCount += 1;
+        const key = chunkKey(record.coordinate);
+        attachedKeys.push(key);
+        if (!this.desiredKeys.has(key)) {
+          retainedCount += 1;
+        }
       } else if (record.state === 'queued') {
         queuedCount += 1;
       }
     }
+    attachedKeys.sort();
 
     return {
       mapEpoch: this.mapEpoch,
       attachedCount,
-      retainedCount: 0,
+      attachedKeys,
+      retainedCount,
       queuedCount,
       inFlightCount: this.inFlightCount,
       lastBundleBuildMs: this.lastBundleBuildMs,
@@ -168,6 +193,7 @@ export class ChunkStreamingManager {
       initialReady: this.initialReady,
       buildBudgetMs: STREAMING_BUILD_BUDGET_MS,
       initialDesiredBudget: INITIAL_DESIRED_CHUNK_BUDGET,
+      selectionRevision: this.viewRevision,
     };
   }
 
@@ -197,30 +223,41 @@ export class ChunkStreamingManager {
 
     for (const record of [...this.records.values()]) {
       const key = chunkKey(record.coordinate);
-      if (!this.desiredKeys.has(key) && record.state === 'attached') {
-        this.retireRecord(record);
+      if (this.desiredKeys.has(key)) {
+        record.retainedSinceRevision = undefined;
+      } else if (record.state === 'attached') {
+        record.retainedSinceRevision ??= this.viewRevision;
       } else if (!this.desiredKeys.has(key) && record.state === 'queued') {
         record.state = 'disposed';
         this.records.delete(key);
       }
     }
 
-    this.queue = this.queue.filter((entry) => {
-      const keep = entry.epoch === this.mapEpoch && this.desiredKeys.has(chunkKey(entry.coordinate));
-      if (!keep) {
-        const key = chunkKey(entry.coordinate);
-        const record = this.records.get(key);
-        if (record?.state === 'queued') {
-          record.state = 'disposed';
-          this.records.delete(key);
-        }
-      }
-      return keep;
+    const desiredOrder = new Map(
+      desiredCoordinates.map((coordinate, index) => [chunkKey(coordinate), index]),
+    );
+    const nextQueue = this.queue.filter((entry) => {
+      const key = chunkKey(entry.coordinate);
+      const record = this.records.get(key);
+      return record?.state === 'queued' && this.desiredKeys.has(key);
     });
-
+    nextQueue.sort((first, second) => {
+      return (desiredOrder.get(chunkKey(first.coordinate)) ?? Number.MAX_SAFE_INTEGER) -
+        (desiredOrder.get(chunkKey(second.coordinate)) ?? Number.MAX_SAFE_INTEGER);
+    });
+    const queuedKeys = new Set(nextQueue.map((entry) => chunkKey(entry.coordinate)));
     for (const coordinate of desiredCoordinates) {
       const key = chunkKey(coordinate);
-      if (this.records.has(key)) {
+      const existing = this.records.get(key);
+      if (existing) {
+        if (existing.state === 'queued' && !queuedKeys.has(key)) {
+          nextQueue.push({
+            epoch: this.mapEpoch,
+            viewRevision: this.viewRevision,
+            coordinate,
+          });
+          queuedKeys.add(key);
+        }
         continue;
       }
       this.records.set(key, {
@@ -228,12 +265,19 @@ export class ChunkStreamingManager {
         coordinate,
         state: 'queued',
       });
-      this.queue.push({
+      nextQueue.push({
         epoch: this.mapEpoch,
         viewRevision: this.viewRevision,
         coordinate,
       });
+      queuedKeys.add(key);
     }
+    nextQueue.sort((first, second) => {
+      return (desiredOrder.get(chunkKey(first.coordinate)) ?? Number.MAX_SAFE_INTEGER) -
+        (desiredOrder.get(chunkKey(second.coordinate)) ?? Number.MAX_SAFE_INTEGER);
+    });
+    this.queue = nextQueue;
+    this.enforceRetainedBudget();
   }
 
   private buildNextBundle(): void {
@@ -362,6 +406,36 @@ export class ChunkStreamingManager {
     this.records.delete(chunkKey(record.coordinate));
   }
 
+  private retireStaleRecordsIfSafe(): void {
+    if (!this.currentSelection || this.currentSelection.visible.some((chunk) => {
+      const record = this.records.get(chunkKey(chunk));
+      return record?.state !== 'attached';
+    })) {
+      return;
+    }
+
+    for (const record of [...this.records.values()]) {
+      if (record.state === 'attached' && !this.desiredKeys.has(chunkKey(record.coordinate))) {
+        this.retireRecord(record);
+      }
+    }
+  }
+
+  private enforceRetainedBudget(): void {
+    const retainedRecords = [...this.records.values()]
+      .filter((record) => record.state === 'attached' && !this.desiredKeys.has(chunkKey(record.coordinate)))
+      .sort((first, second) =>
+        (first.retainedSinceRevision ?? 0) - (second.retainedSinceRevision ?? 0),
+      );
+    const excessCount = retainedRecords.length - MAX_RETAINED_CHUNKS;
+    for (let index = 0; index < excessCount; index += 1) {
+      const record = retainedRecords[index];
+      if (record) {
+        this.retireRecord(record);
+      }
+    }
+  }
+
   private resolveInitialReadiness(): void {
     if (this.initialReady || this.initialVisibleKeys.size === 0) {
       return;
@@ -388,4 +462,16 @@ export class ChunkStreamingManager {
     this.forestRenderer = null;
     this.depositRenderer = null;
   }
+}
+
+function createCameraViewSignature(
+  camera: THREE.OrthographicCamera,
+  navigationState?: CameraNavigationState,
+): string {
+  camera.updateMatrixWorld(true);
+  return [
+    ...camera.matrixWorld.elements,
+    ...camera.projectionMatrix.elements,
+    navigationState?.navigationPlaneY ?? 0,
+  ].map((value) => Math.round(value * 1_000)).join(',');
 }

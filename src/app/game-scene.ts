@@ -4,7 +4,9 @@ import { TERRAIN_VERTICAL_SCALE } from './map/terrain-generation';
 import {
   BASE_CAMERA_VIEW_HEIGHT,
   CAMERA_NAVIGATION_PLANE_Y,
+  CameraConstraintOptions,
   CameraController,
+  MAX_CAMERA_VIEW_HEIGHT,
 } from './camera-controller';
 import { ChunkDebugVisualizer } from './chunk-debug-visualizer';
 import { ChunkStreamingManager } from './chunk-streaming-manager';
@@ -13,6 +15,11 @@ const CAMERA_ORBIT_RADIUS = Math.sqrt(90 ** 2 + 90 ** 2 + 90 ** 2);
 const CAMERA_FAR_PLANE = Math.ceil(
   Math.hypot(MAP_WIDTH, MAP_HEIGHT) + CAMERA_ORBIT_RADIUS + TERRAIN_VERTICAL_SCALE + 16,
 );
+const CAMERA_FOG_NEAR = 420;
+const CAMERA_MAP_EDGE_PADDING = 32;
+const CAMERA_MINIMUM_ELEVATION = 40;
+const CAMERA_MAXIMUM_ELEVATION = 88;
+const MAP_BACKDROP_SIZE = Math.max(MAP_WIDTH, MAP_HEIGHT) * 3;
 
 export class GameScene {
   private readonly scene = new THREE.Scene();
@@ -21,9 +28,11 @@ export class GameScene {
   private readonly cameraController: CameraController;
   private readonly chunkStreamingManager: ChunkStreamingManager;
   private readonly chunkDebugVisualizer: ChunkDebugVisualizer | null;
+  private readonly mapBackdrop: THREE.Mesh;
   private readonly resizeObserver: ResizeObserver;
   private frameHandle = 0;
   private previousFrameTime = performance.now();
+  private lastCameraFar = Number.NaN;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -42,13 +51,16 @@ export class GameScene {
     this.camera.position.set(90, 108, 90);
     this.camera.lookAt(0, CAMERA_NAVIGATION_PLANE_Y, 0);
     this.cameraController = new CameraController(this.camera, canvas);
+    this.cameraController.setConstraints(CAMERA_CONSTRAINTS);
     this.chunkStreamingManager = new ChunkStreamingManager(this.scene);
     this.chunkDebugVisualizer = isChunkDebugEnabled()
       ? new ChunkDebugVisualizer(this.scene, host)
       : null;
 
     this.scene.background = new THREE.Color(0x59636c);
-    this.scene.fog = new THREE.Fog(0x59636c, 260, 500);
+    this.scene.fog = new THREE.Fog(0x59636c, CAMERA_FOG_NEAR, CAMERA_FAR_PLANE);
+    this.mapBackdrop = createMapBackdrop();
+    this.scene.add(this.mapBackdrop);
 
     this.addSoftLighting();
 
@@ -85,10 +97,16 @@ export class GameScene {
     startingCell?: number,
   ): Promise<void> {
     this.chunkStreamingManager.beginMap(data, seaLevelSample);
+    const seaLevelWorld = (seaLevelSample / 65_535) * TERRAIN_VERTICAL_SCALE + 0.08;
+    this.cameraController.setNavigationPlaneY(seaLevelWorld);
+    this.mapBackdrop.position.y = seaLevelWorld - 0.04;
 
     if (startingCell === undefined) {
       this.cameraController.reset(0, 0);
-      return this.chunkStreamingManager.beginInitialView(this.camera);
+      return this.chunkStreamingManager.beginInitialView(
+        this.camera,
+        this.cameraController.getNavigationState(),
+      );
     }
 
     const cellX = startingCell % MAP_WIDTH;
@@ -97,7 +115,10 @@ export class GameScene {
       cellX - MAP_WIDTH / 2 + 0.5,
       cellY - MAP_HEIGHT / 2 + 0.5,
     );
-    return this.chunkStreamingManager.beginInitialView(this.camera);
+    return this.chunkStreamingManager.beginInitialView(
+      this.camera,
+      this.cameraController.getNavigationState(),
+    );
   }
 
   setNavigationEnabled(enabled: boolean): void {
@@ -109,7 +130,8 @@ export class GameScene {
     const now = performance.now();
     this.cameraController.update((now - this.previousFrameTime) / 1_000);
     this.previousFrameTime = now;
-    this.chunkStreamingManager.update(this.camera);
+    this.updateCameraClipping();
+    this.chunkStreamingManager.update(this.camera, this.cameraController.getNavigationState());
     const currentSelection = this.chunkStreamingManager.getCurrentSelection();
     if (this.chunkDebugVisualizer && currentSelection) {
       this.chunkDebugVisualizer.update(
@@ -137,6 +159,32 @@ export class GameScene {
     this.renderer.setSize(width, height, false);
   }
 
+  private updateCameraClipping(): void {
+    const mapCorners = [
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.minimumX, CAMERA_CONSTRAINTS.terrainMinimumY, CAMERA_CONSTRAINTS.bounds.minimumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.minimumX, CAMERA_CONSTRAINTS.terrainMaximumY, CAMERA_CONSTRAINTS.bounds.minimumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.minimumX, CAMERA_CONSTRAINTS.terrainMinimumY, CAMERA_CONSTRAINTS.bounds.maximumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.minimumX, CAMERA_CONSTRAINTS.terrainMaximumY, CAMERA_CONSTRAINTS.bounds.maximumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.maximumX, CAMERA_CONSTRAINTS.terrainMinimumY, CAMERA_CONSTRAINTS.bounds.minimumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.maximumX, CAMERA_CONSTRAINTS.terrainMaximumY, CAMERA_CONSTRAINTS.bounds.minimumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.maximumX, CAMERA_CONSTRAINTS.terrainMinimumY, CAMERA_CONSTRAINTS.bounds.maximumZ),
+      new THREE.Vector3(CAMERA_CONSTRAINTS.bounds.maximumX, CAMERA_CONSTRAINTS.terrainMaximumY, CAMERA_CONSTRAINTS.bounds.maximumZ),
+    ];
+    const maximumDistance = Math.max(
+      ...mapCorners.map((corner) => this.camera.position.distanceTo(corner)),
+    );
+    const nextFar = Math.max(512, maximumDistance + 64);
+    if (Math.abs(nextFar - this.lastCameraFar) > 0.5) {
+      this.camera.far = nextFar;
+      this.camera.updateProjectionMatrix();
+      this.lastCameraFar = nextFar;
+    }
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.near = Math.min(CAMERA_FOG_NEAR, this.camera.far * 0.65);
+      this.scene.fog.far = this.camera.far;
+    }
+  }
+
   private addSoftLighting(): void {
     const ambient = new THREE.HemisphereLight(0xb6b5a7, 0x404640, 1.55);
     this.scene.add(ambient);
@@ -150,6 +198,35 @@ export class GameScene {
     this.scene.add(coolFill);
   }
 
+}
+
+const CAMERA_CONSTRAINTS: CameraConstraintOptions = {
+  bounds: {
+    minimumX: -MAP_WIDTH / 2,
+    maximumX: MAP_WIDTH / 2,
+    minimumZ: -MAP_HEIGHT / 2,
+    maximumZ: MAP_HEIGHT / 2,
+  },
+  terrainMinimumY: 0,
+  terrainMaximumY: TERRAIN_VERTICAL_SCALE + 5,
+  edgePadding: CAMERA_MAP_EDGE_PADDING,
+  minimumElevationDegrees: CAMERA_MINIMUM_ELEVATION,
+  maximumElevationDegrees: CAMERA_MAXIMUM_ELEVATION,
+  maximumVisibleHeight: MAX_CAMERA_VIEW_HEIGHT,
+};
+
+function createMapBackdrop(): THREE.Mesh {
+  const geometry = new THREE.PlaneGeometry(MAP_BACKDROP_SIZE, MAP_BACKDROP_SIZE);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x466873,
+    depthWrite: false,
+  });
+  const backdrop = new THREE.Mesh(geometry, material);
+  backdrop.name = 'map-background-water';
+  backdrop.rotation.x = -Math.PI / 2;
+  backdrop.position.y = CAMERA_NAVIGATION_PLANE_Y - 0.04;
+  backdrop.renderOrder = -1;
+  return backdrop;
 }
 
 function isChunkDebugEnabled(): boolean {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   BASE_CAMERA_VIEW_HEIGHT,
   CAMERA_NAVIGATION_PLANE_Y,
+  CameraConstraintOptions,
   CameraController,
   MAX_CAMERA_VIEW_HEIGHT,
   MIN_CAMERA_VIEW_HEIGHT,
@@ -33,13 +34,51 @@ describe('CameraController', () => {
     expect(camera.position.x).toBeCloseTo(102);
     expect(camera.position.y).toBeCloseTo(CAMERA_NAVIGATION_PLANE_Y + 90);
     expect(camera.position.z).toBeCloseTo(82);
-    expect(camera.zoom).toBe(1);
+    expect(camera.zoom).toBeCloseTo(BASE_CAMERA_VIEW_HEIGHT / MAX_CAMERA_VIEW_HEIGHT);
+  });
+
+  it('keeps the orbit pivot on the active map surface', () => {
+    controller.setNavigationPlaneY(35.24);
+    controller.reset(12, -8);
+
+    expect(camera.position.y).toBeCloseTo(125.24);
+    expect(controller.getDebugState().target[1]).toBeCloseTo(35.24);
+    expect(controller.getDebugState().navigationPlaneY).toBeCloseTo(35.24);
+  });
+
+  it('does not relocate the target when the view reaches the map edge', () => {
+    controller.setConstraints(createConstraints(-128, 128, -128, 128));
+    controller.reset(400, 400);
+
+    expect(controller.getDebugState().target[0]).toBeCloseTo(400);
+    expect(controller.getDebugState().target[2]).toBeCloseTo(400);
+    expect(controller.getDebugState().targetClamped).toBeFalse();
+  });
+
+  it('raises the minimum zoom when a low-angle footprint cannot fit', () => {
+    controller.setConstraints(createConstraints(-32, 32, -32, 32));
+
+    expect(controller.getDebugState().minimumZoom).toBeGreaterThan(BASE_CAMERA_VIEW_HEIGHT / MAX_CAMERA_VIEW_HEIGHT);
+  });
+
+  it('clamps long frame deltas before applying keyboard movement', () => {
+    canvas.focus();
+    canvas.dispatchEvent(new Event('pointerdown'));
+    controller.setNavigationEnabled(true);
+    const before = controller.getDebugState().target;
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+
+    controller.update(1);
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+
+    const after = controller.getDebugState().target;
+    expect(Math.hypot(after[0] - before[0], after[2] - before[2])).toBeLessThan(10);
   });
 
   it('converts the visible-height limits into orthographic zoom limits', () => {
-    expect(BASE_CAMERA_VIEW_HEIGHT / camera.zoom).toBe(BASE_CAMERA_VIEW_HEIGHT);
+    expect(BASE_CAMERA_VIEW_HEIGHT / camera.zoom).toBeCloseTo(MAX_CAMERA_VIEW_HEIGHT);
     expect(BASE_CAMERA_VIEW_HEIGHT / MIN_CAMERA_VIEW_HEIGHT).toBeGreaterThan(1);
-    expect(BASE_CAMERA_VIEW_HEIGHT / MAX_CAMERA_VIEW_HEIGHT).toBeLessThan(1);
+    expect(BASE_CAMERA_VIEW_HEIGHT / MAX_CAMERA_VIEW_HEIGHT).toBeGreaterThan(1);
   });
 
   it('moves continuously with focused keyboard input only when enabled', () => {
@@ -68,3 +107,20 @@ describe('CameraController', () => {
     expect(camera.position.x).toBe(movedX);
   });
 });
+
+function createConstraints(
+  minimumX: number,
+  maximumX: number,
+  minimumZ: number,
+  maximumZ: number,
+): CameraConstraintOptions {
+  return {
+    bounds: { minimumX, maximumX, minimumZ, maximumZ },
+    terrainMinimumY: 0,
+    terrainMaximumY: 70,
+    edgePadding: 0,
+    minimumElevationDegrees: 20,
+    maximumElevationDegrees: 88,
+    maximumVisibleHeight: MAX_CAMERA_VIEW_HEIGHT,
+  };
+}

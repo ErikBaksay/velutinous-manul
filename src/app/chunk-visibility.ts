@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { CAMERA_NAVIGATION_PLANE_Y } from './camera-controller';
+import {
+  CAMERA_NAVIGATION_PLANE_USER_DATA_KEY,
+  CAMERA_NAVIGATION_PLANE_Y,
+  CameraNavigationState,
+  getCameraTerrainProjectionBounds,
+} from './camera-controller';
 import { MAP_HEIGHT, MAP_WIDTH } from './map/map-types';
 import { TERRAIN_VERTICAL_SCALE } from './map/terrain-generation';
 import { TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
@@ -31,22 +36,21 @@ export interface ChunkViewSelection {
 }
 
 const TERRAIN_MINIMUM_HEIGHT = 0;
-const NDC_CORNERS = [
-  new THREE.Vector2(-1, -1),
-  new THREE.Vector2(-1, 1),
-  new THREE.Vector2(1, -1),
-  new THREE.Vector2(1, 1),
-] as const;
 
 export function selectChunksForView(
   camera: THREE.OrthographicCamera,
   mapWidth = MAP_WIDTH,
   mapHeight = MAP_HEIGHT,
   chunkSize = TERRAIN_CHUNK_SIZE,
+  navigationState?: CameraNavigationState,
 ): ChunkViewSelection {
   camera.updateMatrixWorld(true);
   const frustum = createCameraFrustum(camera);
-  const projectionBounds = getTerrainProjectionBounds(camera);
+  const projectionBounds = getCameraTerrainProjectionBounds(
+    camera,
+    TERRAIN_MINIMUM_HEIGHT,
+    MAX_CHUNK_CONTENT_HEIGHT,
+  );
   const candidateBounds = getCandidateChunkBounds(
     projectionBounds,
     mapWidth,
@@ -64,7 +68,7 @@ export function selectChunksForView(
     }
   }
 
-  const navigationTarget = getNavigationTarget(camera);
+  const navigationTarget = getNavigationTarget(camera, navigationState);
   sortChunksByTarget(visible, navigationTarget, mapWidth, mapHeight, chunkSize);
   const visibleKeys = new Set(visible.map(chunkKey));
   const prefetch: LogicalChunkCoordinate[] = [];
@@ -141,10 +145,14 @@ export function chunkKey(chunk: LogicalChunkCoordinate): string {
 
 export function createChunkSelectionSignature(selection: ChunkViewSelection): string {
   return [
-    selection.visible.map(chunkKey).join(','),
-    selection.prefetch.map(chunkKey).join(','),
-    selection.rejected.map(chunkKey).join(','),
+    createCoordinateSetSignature(selection.visible),
+    createCoordinateSetSignature(selection.prefetch),
+    createCoordinateSetSignature(selection.rejected),
   ].join('|');
+}
+
+function createCoordinateSetSignature(chunks: readonly LogicalChunkCoordinate[]): string {
+  return chunks.map(chunkKey).sort().join(',');
 }
 
 function createCameraFrustum(camera: THREE.OrthographicCamera): THREE.Frustum {
@@ -155,14 +163,25 @@ function createCameraFrustum(camera: THREE.OrthographicCamera): THREE.Frustum {
   return new THREE.Frustum().setFromProjectionMatrix(projectionView);
 }
 
-function getNavigationTarget(camera: THREE.OrthographicCamera): THREE.Vector3 {
+function getNavigationTarget(
+  camera: THREE.OrthographicCamera,
+  navigationState?: CameraNavigationState,
+): THREE.Vector3 {
   const direction = camera.getWorldDirection(new THREE.Vector3());
   if (Math.abs(direction.y) < Number.EPSILON) {
     return camera.position.clone();
   }
 
-  const distance = (CAMERA_NAVIGATION_PLANE_Y - camera.position.y) / direction.y;
+  const navigationPlaneY = navigationState?.navigationPlaneY ?? getNavigationPlaneY(camera);
+  const distance = (navigationPlaneY - camera.position.y) / direction.y;
   return camera.position.clone().addScaledVector(direction, distance);
+}
+
+function getNavigationPlaneY(camera: THREE.OrthographicCamera): number {
+  const value = camera.userData[CAMERA_NAVIGATION_PLANE_USER_DATA_KEY];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : CAMERA_NAVIGATION_PLANE_Y;
 }
 
 function sortChunksByTarget(
@@ -177,47 +196,6 @@ function sortChunksByTarget(
     const secondCenter = getChunkWorldCenter(second, mapWidth, mapHeight, chunkSize);
     return firstCenter.distanceToSquared(target) - secondCenter.distanceToSquared(target);
   });
-}
-
-function getTerrainProjectionBounds(camera: THREE.OrthographicCamera): {
-  minimumX: number;
-  maximumX: number;
-  minimumZ: number;
-  maximumZ: number;
-} {
-  const direction = camera.getWorldDirection(new THREE.Vector3());
-  const points: THREE.Vector3[] = [];
-  const nearToFarDistance = camera.far - camera.near;
-
-  for (const corner of NDC_CORNERS) {
-    const nearPoint = new THREE.Vector3(corner.x, corner.y, -1).unproject(camera);
-    for (const height of [TERRAIN_MINIMUM_HEIGHT, MAX_CHUNK_CONTENT_HEIGHT]) {
-      if (Math.abs(direction.y) < Number.EPSILON) {
-        continue;
-      }
-
-      const distance = (height - nearPoint.y) / direction.y;
-      if (distance < -0.001 || distance > nearToFarDistance + 0.001) {
-        continue;
-      }
-
-      points.push(nearPoint.clone().addScaledVector(direction, distance));
-    }
-  }
-
-  if (points.length === 0) {
-    for (const corner of NDC_CORNERS) {
-      points.push(new THREE.Vector3(corner.x, corner.y, -1).unproject(camera));
-      points.push(new THREE.Vector3(corner.x, corner.y, 1).unproject(camera));
-    }
-  }
-
-  return {
-    minimumX: Math.min(...points.map((point) => point.x)),
-    maximumX: Math.max(...points.map((point) => point.x)),
-    minimumZ: Math.min(...points.map((point) => point.z)),
-    maximumZ: Math.max(...points.map((point) => point.z)),
-  };
 }
 
 function getCandidateChunkBounds(

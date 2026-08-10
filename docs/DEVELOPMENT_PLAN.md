@@ -422,3 +422,26 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Automated metrics showed broad max-zoom-out views can carry a substantial queued/missing-desired backlog while the active desired set is larger than the attached set. This is evidence for a streaming-readiness/coverage investigation, not proof of the shallow-angle disappearance cause.
 - Manual review remains pending at 1440×900 using `?debug=chunks`, the fixed seed, and the same camera matrix. The shallow-angle cutoff remains intentionally deferred; no camera, frustum, clipping, streaming, or rendering fix was implemented.
 - No files were staged, committed, or pushed by the assistant.
+
+### 2026-08-10 — Shallow-angle chunk disappearance fix
+
+- Replaced the four-corner terrain projection shortcut with exact orthographic-frustum clipping against the terrain content-height slab, including all eight frustum corners and twelve frustum-edge/slab intersections.
+- Added transition-safe chunk streaming: current visible chunks are prioritized ahead of prefetch work, outgoing attached bundles are retained until the replacement visible set is ready, and retained bundles are bounded by the existing 576-chunk budget.
+- Added exact attached-key, retained-count, and missing-visible diagnostics to the development debug surface.
+- Added a full-map reference-frustum regression across 12°, 20°, 30°, 45°, and 65° elevations, streaming lifecycle coverage, and Playwright shallow-transition coverage at default and zoomed-out views.
+- Validation: `npm run build`, both TypeScript checks, focused visibility/streaming Karma specs (6 and 3 passed), and `npm run e2e` (13 passed). The full 48-spec Karma run compiled but Chrome disconnected after 8 specs in this environment.
+- No camera limits, framing, map generation, chunk geometry, or rendering-layer behavior were changed.
+
+### 2026-08-10 — Shallow-angle view distance correction
+
+- Confirmed the map camera is orthographic, so there is no perspective FOV or lens value causing the apparent telephoto behavior.
+- Extended scene fog from its previous 500-unit cutoff to the camera’s map-safe far plane, while retaining atmospheric fade from 420 units.
+- This prevents distant terrain from fading completely into the background during shallow-angle views; camera controls, orthographic framing, map bounds, and chunk streaming remain unchanged.
+- Validation: `npm run build`, both TypeScript checks, and `npm run e2e` (13 passed).
+
+### 2026-08-10 — Surface-aligned orbit pivot
+
+- Reproduced the zoomed-in shallow-tilt issue: the fixed `Y = 18` navigation plane was below the generated terrain range (`≈25.8–60`) and below the default sea surface (`≈35.2`).
+- Made the camera navigation/orbit plane follow the generated sea-level surface, including camera movement, reset framing, chunk target sorting, and diagnostics.
+- Added camera-controller coverage and Playwright coverage for zooming in first, then tilting to 12°; the pivot now remains on the map surface and visible chunks stay attached.
+- Validation: focused camera Karma specs (4 passed), `npm run build`, both TypeScript checks, and full `npm run e2e` (13 passed).

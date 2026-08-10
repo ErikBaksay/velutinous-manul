@@ -90,7 +90,14 @@ export class ChunkDebugVisualizer {
     }
 
     const activeDesiredCount = selection.desired.length - selection.rejected.length;
-    const missingDesiredCount = Math.max(activeDesiredCount - diagnostics.attachedCount, 0);
+    const attachedKeys = new Set(diagnostics.attachedKeys);
+    const rejectedKeys = new Set(selection.rejected.map(chunkKey));
+    const activeDesiredKeys = [
+      ...selection.visible,
+      ...selection.prefetch.filter((chunk) => !rejectedKeys.has(chunkKey(chunk))),
+    ].map(chunkKey);
+    const missingDesiredCount = activeDesiredKeys.filter((key) => !attachedKeys.has(key)).length;
+    const missingVisibleCount = selection.visible.filter((chunk) => !attachedKeys.has(chunkKey(chunk))).length;
     const frustumCulledCount = Math.max(selection.candidateCount - selection.visible.length, 0);
     const budgetMessage = selection.budgetState === 'within-budget'
       ? `tuning (${INITIAL_DESIRED_CHUNK_BUDGET} desired)`
@@ -105,6 +112,7 @@ export class ChunkDebugVisualizer {
       `active:     ${activeDesiredCount}`,
       `attached:   ${diagnostics.attachedCount}`,
       `missing:    ${missingDesiredCount}`,
+      `missing visible: ${missingVisibleCount}`,
       `retained:   ${diagnostics.retainedCount}`,
       `queued:     ${diagnostics.queuedCount}`,
       `building:   ${diagnostics.inFlightCount}`,
@@ -119,13 +127,18 @@ export class ChunkDebugVisualizer {
       `survey peak: visible ${this.budgetReport.peakVisibleCount}, desired ${this.budgetReport.peakDesiredCount}`,
       `prefetch:   ${CHUNK_PREFETCH_RADIUS}-chunk ring`,
       `map epoch:  ${diagnostics.mapEpoch}`,
+      `selection:  ${diagnostics.selectionRevision}`,
       `initial:    ${diagnostics.initialReady ? 'ready' : 'streaming'}`,
       `camera:     ${formatVector(camera.position)}`,
       `target:     ${formatVector(camera.target)}`,
+      `pivot y:    ${camera.navigationPlaneY.toFixed(2)}`,
       `zoom:       ${camera.zoom.toFixed(4)}`,
+      `view height:${camera.visibleViewHeight.toFixed(2)}`,
       `polar:      ${camera.polarAngleDegrees.toFixed(2)}°`,
       `elevation:  ${camera.elevationDegrees.toFixed(2)}°`,
       `heading:    ${camera.headingDegrees.toFixed(2)}°`,
+      `limits:     elev ${camera.minimumElevationDegrees.toFixed(1)}–${camera.maximumElevationDegrees.toFixed(1)}° / zoom ${camera.minimumZoom.toFixed(4)}–${camera.maximumZoom.toFixed(4)}`,
+      `target:     ${camera.targetClamped ? 'clamped this frame' : 'free within bounds'}`,
       `input:      navigation ${camera.navigationEnabled ? 'enabled' : 'locked'}, focus ${camera.sceneHasFocus ? 'yes' : 'no'}`,
     ].join('\n');
 
@@ -135,18 +148,28 @@ export class ChunkDebugVisualizer {
     this.metricsElement.dataset['activeDesired'] = String(activeDesiredCount);
     this.metricsElement.dataset['attached'] = String(diagnostics.attachedCount);
     this.metricsElement.dataset['missingDesired'] = String(missingDesiredCount);
+    this.metricsElement.dataset['missingVisible'] = String(missingVisibleCount);
+    this.metricsElement.dataset['attachedChunks'] = diagnostics.attachedKeys.join(',');
     this.metricsElement.dataset['queued'] = String(diagnostics.queuedCount);
     this.metricsElement.dataset['building'] = String(diagnostics.inFlightCount);
     this.metricsElement.dataset['rejected'] = String(selection.rejected.length);
     this.metricsElement.dataset['candidates'] = String(selection.candidateCount);
     this.metricsElement.dataset['frustumCulled'] = String(frustumCulledCount);
     this.metricsElement.dataset['initial'] = diagnostics.initialReady ? 'ready' : 'streaming';
+    this.metricsElement.dataset['selectionRevision'] = String(diagnostics.selectionRevision);
     this.metricsElement.dataset['visibleChunks'] = selection.visible.map(chunkKey).join(',');
     this.metricsElement.dataset['prefetchChunks'] = selection.prefetch.map(chunkKey).join(',');
     this.metricsElement.dataset['rejectedChunks'] = selection.rejected.map(chunkKey).join(',');
     this.metricsElement.dataset['cameraPosition'] = formatVector(camera.position);
     this.metricsElement.dataset['cameraTarget'] = formatVector(camera.target);
+    this.metricsElement.dataset['navigationPlaneY'] = String(camera.navigationPlaneY);
     this.metricsElement.dataset['zoomValue'] = String(camera.zoom);
+    this.metricsElement.dataset['visibleViewHeight'] = String(camera.visibleViewHeight);
+    this.metricsElement.dataset['targetClamped'] = String(camera.targetClamped);
+    this.metricsElement.dataset['minimumZoom'] = String(camera.minimumZoom);
+    this.metricsElement.dataset['maximumZoom'] = String(camera.maximumZoom);
+    this.metricsElement.dataset['minimumElevation'] = String(camera.minimumElevationDegrees);
+    this.metricsElement.dataset['maximumElevation'] = String(camera.maximumElevationDegrees);
     this.metricsElement.dataset['polarAngle'] = String(camera.polarAngleDegrees);
     this.metricsElement.dataset['elevation'] = String(camera.elevationDegrees);
     this.metricsElement.dataset['heading'] = String(camera.headingDegrees);

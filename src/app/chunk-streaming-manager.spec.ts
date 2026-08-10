@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { createEmptyAuthoritativeMapData } from './map/map-types';
-import { ChunkStreamingManager } from './chunk-streaming-manager';
+import {
+  ChunkStreamingManager,
+  STREAMING_BUILD_BUDGET_MS,
+} from './chunk-streaming-manager';
+import { INITIAL_DESIRED_CHUNK_BUDGET } from './chunk-visibility';
 
 describe('ChunkStreamingManager', () => {
   it('attaches the initial visible bundles before resolving readiness', async () => {
@@ -46,7 +50,55 @@ describe('ChunkStreamingManager', () => {
     expect(scene.getObjectByName('terrain-chunks')).toBeDefined();
     manager.destroy();
   });
+
+  it('retains outgoing bundles until the new visible set is attached', async () => {
+    const scene = new THREE.Scene();
+    const manager = new ChunkStreamingManager(scene);
+    const camera = createCamera();
+
+    manager.beginMap(createEmptyAuthoritativeMapData(), 32_000);
+    const ready = manager.beginInitialView(camera);
+    runFrames(manager, camera, 240);
+    await ready;
+
+    const previousAttached = new Set(manager.getDiagnostics().attachedKeys);
+    camera.position.set(474, 45, 294);
+    camera.lookAt(384, 18, 384);
+    camera.updateMatrixWorld(true);
+    manager.update(camera);
+
+    const selection = manager.getCurrentSelection();
+    const transitioned = manager.getDiagnostics();
+    if (!selection) {
+      throw new Error('Expected a current selection after moving the camera.');
+    }
+    const nextDesired = new Set(selection.desired.map((chunk) => `${chunk.x}:${chunk.y}`));
+    const outgoing = [...previousAttached].filter((key) => !nextDesired.has(key));
+    expect(outgoing.length).toBeGreaterThan(0);
+    expect(outgoing.some((key) => transitioned.attachedKeys.includes(key))).toBeTrue();
+    expect(transitioned.retainedCount).toBeGreaterThan(0);
+    expect(transitioned.retainedCount).toBeLessThanOrEqual(INITIAL_DESIRED_CHUNK_BUDGET);
+
+    runFrames(manager, camera, 240);
+    const settled = manager.getDiagnostics();
+    expect(settled.retainedCount).toBe(0);
+    expect(selection.visible.every((chunk) => settled.attachedKeys.includes(`${chunk.x}:${chunk.y}`))).toBeTrue();
+    expect(settled.queuedCount).toBe(0);
+    expect(settled.inFlightCount).toBe(0);
+    expect(settled.buildBudgetMs).toBe(STREAMING_BUILD_BUDGET_MS);
+    manager.destroy();
+  });
 });
+
+function runFrames(
+  manager: ChunkStreamingManager,
+  camera: THREE.OrthographicCamera,
+  frameCount: number,
+): void {
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    manager.update(camera);
+  }
+}
 
 function createCamera(): THREE.OrthographicCamera {
   const camera = new THREE.OrthographicCamera(-64, 64, 64, -64, 0.1, 1_800);

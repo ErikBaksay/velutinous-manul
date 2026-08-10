@@ -38,7 +38,7 @@ const VIEWPORTS = [
   { label: '2.4:1', aspect: 2.4 },
 ] as const;
 const VIEW_HEIGHTS = [MIN_CAMERA_VIEW_HEIGHT, BASE_CAMERA_VIEW_HEIGHT, MAX_CAMERA_VIEW_HEIGHT] as const;
-const ELEVATIONS = [12, 35, 60, 78, 88] as const;
+const ELEVATIONS = [40, 55, 70, 80, 88] as const;
 const HEADINGS = [0, 45, 90, 135] as const;
 const TARGETS = [
   { label: 'center', x: 0, z: 0 },

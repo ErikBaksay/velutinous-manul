@@ -1,10 +1,14 @@
 import * as THREE from 'three';
+import { MAP_HEIGHT, MAP_WIDTH } from './map/map-types';
 import {
+  chunkKey,
   createChunkSelectionSignature,
+  getChunkWorldBounds,
   getChunkWorldCenter,
   INITIAL_DESIRED_CHUNK_BUDGET,
   selectChunksForView,
 } from './chunk-visibility';
+import { TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
 
 describe('chunk visibility selection', () => {
   it('selects a bounded candidate area instead of scanning the full map', () => {
@@ -67,6 +71,16 @@ describe('chunk visibility selection', () => {
       expect(selection.budgetState).toBe('visible-over-budget');
     }
   });
+
+  it('does not omit frustum-intersecting chunks at shallow elevations', () => {
+    for (const elevation of [12, 20, 30, 45, 65]) {
+      const camera = createCoverageCamera(elevation);
+      const selection = selectChunksForView(camera);
+      const expected = getReferenceVisibleChunkKeys(camera);
+
+      expect(selection.visible.map(chunkKey).sort()).toEqual(expected.sort());
+    }
+  });
 });
 
 function createCamera(): THREE.OrthographicCamera {
@@ -76,4 +90,39 @@ function createCamera(): THREE.OrthographicCamera {
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld(true);
   return camera;
+}
+
+function createCoverageCamera(elevationDegrees: number): THREE.OrthographicCamera {
+  const camera = new THREE.OrthographicCamera(-102.4, 102.4, 64, -64, 0.1, 1_800);
+  const horizontalRadius = Math.sqrt(90 ** 2 + 90 ** 2);
+  const heading = THREE.MathUtils.degToRad(315);
+  const elevation = THREE.MathUtils.degToRad(elevationDegrees);
+  camera.position.set(
+    Math.sin(heading) * horizontalRadius,
+    18 + Math.tan(elevation) * horizontalRadius,
+    Math.cos(heading) * horizontalRadius,
+  );
+  camera.lookAt(0, 18, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  return camera;
+}
+
+function getReferenceVisibleChunkKeys(camera: THREE.OrthographicCamera): string[] {
+  const projectionView = new THREE.Matrix4().multiplyMatrices(
+    camera.projectionMatrix,
+    camera.matrixWorldInverse,
+  );
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(projectionView);
+  const keys: string[] = [];
+
+  for (let chunkY = 0; chunkY < MAP_HEIGHT / TERRAIN_CHUNK_SIZE; chunkY += 1) {
+    for (let chunkX = 0; chunkX < MAP_WIDTH / TERRAIN_CHUNK_SIZE; chunkX += 1) {
+      if (frustum.intersectsBox(getChunkWorldBounds(chunkX, chunkY))) {
+        keys.push(`${chunkX}:${chunkY}`);
+      }
+    }
+  }
+
+  return keys;
 }

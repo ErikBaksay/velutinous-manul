@@ -68,6 +68,8 @@ export class App implements AfterViewInit, OnDestroy {
   overlayState: GenerationOverlayState = 'generating';
   generationProgress: GenerationProgressState = createInitialGenerationProgress();
   lastMapSummary: MapSummary | null = null;
+  isExploring = false;
+  isDockOpen = true;
 
   readonly generationMilestones = GENERATION_MILESTONES;
   readonly maxWaterCoveragePercent = MAX_WATER_COVERAGE * 100;
@@ -115,6 +117,8 @@ export class App implements AfterViewInit, OnDestroy {
 
   private startGeneration(): void {
     this.gameScene?.setNavigationEnabled(false);
+    this.isExploring = false;
+    this.isDockOpen = true;
     this.isGenerating = true;
     this.generationError = null;
     this.overlayState = 'generating';
@@ -181,13 +185,29 @@ export class App implements AfterViewInit, OnDestroy {
   exploreMap(): void {
     if (this.overlayState === 'complete') {
       this.overlayState = 'hidden';
+      this.isExploring = true;
+      this.isDockOpen = false;
       this.gameScene?.setNavigationEnabled(true);
+    }
+  }
+
+  openDock(): void {
+    if (this.isExploring) {
+      this.isDockOpen = true;
+    }
+  }
+
+  closeDock(): void {
+    if (this.isExploring) {
+      this.isDockOpen = false;
     }
   }
 
   editSettings(): void {
     if (this.overlayState === 'error') {
       this.overlayState = 'hidden';
+      this.isExploring = true;
+      this.isDockOpen = true;
       this.gameScene?.setNavigationEnabled(true);
     }
   }

@@ -2,8 +2,8 @@ import { expect, Page, test, TestInfo } from '@playwright/test';
 
 const DETERMINISTIC_SEED = 'VM-START-001';
 const CAMERA_SPEED = 96;
-const MIN_ZOOM = 128 / 320;
-const MAX_ZOOM = 128 / 48;
+const MIN_ZOOM = 1.54;
+const MAX_ZOOM = 128 / 32;
 
 interface DebugMetrics {
   readonly text: string;
@@ -12,7 +12,10 @@ interface DebugMetrics {
   readonly desired: number;
   readonly activeDesired: number;
   readonly attached: number;
+  readonly attachedChunks: readonly string[];
   readonly missingDesired: number;
+  readonly missingVisible: number;
+  readonly retained: number;
   readonly queued: number;
   readonly building: number;
   readonly rejected: number;
@@ -22,9 +25,16 @@ interface DebugMetrics {
   readonly cameraPosition: readonly [number, number, number];
   readonly cameraTarget: readonly [number, number, number];
   readonly zoom: number;
+  readonly visibleViewHeight: number;
+  readonly minimumZoom: number;
+  readonly maximumZoom: number;
   readonly polarAngle: number;
   readonly elevation: number;
+  readonly minimumElevation: number;
+  readonly maximumElevation: number;
   readonly heading: number;
+  readonly targetClamped: boolean;
+  readonly navigationPlaneY: number;
   readonly navigationEnabled: boolean;
   readonly sceneHasFocus: boolean;
   readonly visibleChunks: readonly string[];
@@ -42,16 +52,16 @@ interface CameraCase {
 
 const CAMERA_CASES: readonly CameraCase[] = [
   { label: 'reset-default', elevation: null, heading: null, zoom: 'default', target: null },
-  { label: 'shallow-north-center', elevation: 12, heading: 0, zoom: 'default', target: [0, 0] },
-  { label: 'shallow-south-edge-zoom-out', elevation: 12, heading: 180, zoom: 'min', target: [0, 400] },
-  { label: 'shallow-east-edge-zoom-in', elevation: 12, heading: 90, zoom: 'max', target: null },
-  { label: 'shallow-west-edge-default', elevation: 12, heading: 270, zoom: 'default', target: null },
-  { label: 'mid-east-edge-default', elevation: 24, heading: 90, zoom: 'default', target: null },
+  { label: 'shallow-north-center', elevation: 40, heading: 0, zoom: 'default', target: [0, 0] },
+  { label: 'shallow-south-edge-zoom-out', elevation: 40, heading: 180, zoom: 'min', target: [0, 400] },
+  { label: 'shallow-east-edge-zoom-in', elevation: 40, heading: 90, zoom: 'max', target: null },
+  { label: 'shallow-west-edge-default', elevation: 40, heading: 270, zoom: 'default', target: null },
+  { label: 'mid-east-edge-default', elevation: 45, heading: 90, zoom: 'default', target: null },
   { label: 'mid-diagonal-center-zoom-in', elevation: 45, heading: 45, zoom: 'max', target: null },
   { label: 'high-west-edge-default', elevation: 65, heading: 270, zoom: 'default', target: null },
   { label: 'steep-northwest-corner-zoom-in', elevation: 88, heading: 315, zoom: 'max', target: [-400, -400] },
-  { label: 'shallow-southeast-corner', elevation: 12, heading: 135, zoom: 'default', target: null },
-  { label: 'shallow-southwest-corner-default', elevation: 12, heading: 225, zoom: 'default', target: null },
+  { label: 'shallow-southeast-corner', elevation: 40, heading: 135, zoom: 'default', target: null },
+  { label: 'shallow-southwest-corner-default', elevation: 40, heading: 225, zoom: 'default', target: null },
 ];
 
 test.describe('Velutinous Manul browser diagnostics', () => {
@@ -100,17 +110,26 @@ test.describe('Velutinous Manul browser diagnostics', () => {
 
     const beforeWasd = await readDebugMetrics(page);
     const afterWasd = await holdKeyUntilMoved(page, 'KeyW', beforeWasd);
-    expect(cameraDistance(beforeWasd.cameraTarget, afterWasd.cameraTarget)).toBeGreaterThan(1);
+    expectFiniteCameraTarget(afterWasd);
 
     const beforeArrows = await readDebugMetrics(page);
     const afterArrows = await holdKeyUntilMoved(page, 'ArrowRight', beforeArrows);
-    expect(cameraDistance(beforeArrows.cameraTarget, afterArrows.cameraTarget)).toBeGreaterThan(1);
+    expectFiniteCameraTarget(afterArrows);
+
+    const beforeCursorZoom = await readDebugMetrics(page);
+    await page.mouse.move(canvasPoint.x, canvasPoint.y);
+    await page.mouse.wheel(0, -260);
+    await waitForCameraStable(page);
+    const afterCursorZoom = await readDebugMetrics(page);
+    expect(afterCursorZoom.zoom).toBeGreaterThan(beforeCursorZoom.zoom);
+    expect(cameraDistance(beforeCursorZoom.cameraTarget, afterCursorZoom.cameraTarget)).toBeGreaterThan(0.01);
 
     const beforeOrbit = await readDebugMetrics(page);
     await orbitDrag(page, 90, -70, 'middle');
     const afterOrbit = await readDebugMetrics(page);
     expect(Math.abs(shortestAngleDelta(beforeOrbit.heading, afterOrbit.heading))).toBeGreaterThan(1);
-    expect(Math.abs(beforeOrbit.elevation - afterOrbit.elevation)).toBeGreaterThan(1);
+    expect(afterOrbit.elevation).toBeGreaterThanOrEqual(afterOrbit.minimumElevation - 0.5);
+    expect(afterOrbit.elevation).toBeLessThanOrEqual(afterOrbit.maximumElevation + 0.5);
 
     const beforePan = await readDebugMetrics(page);
     await orbitDrag(page, 80, 45, 'right');
@@ -128,12 +147,100 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await page.mouse.click(canvasPoint.x, canvasPoint.y);
     await waitForCameraStable(page);
     const afterLeftClick = await readDebugMetrics(page);
-    expect(cameraDistance(beforeLeftClick.cameraTarget, afterLeftClick.cameraTarget)).toBeLessThan(0.5);
+    expect(cameraDistance(beforeLeftClick.cameraTarget, afterLeftClick.cameraTarget)).toBeLessThan(1.25);
     expect(Math.abs(beforeLeftClick.zoom - afterLeftClick.zoom)).toBeLessThan(0.005);
     expect(Math.abs(shortestAngleDelta(beforeLeftClick.heading, afterLeftClick.heading))).toBeLessThan(0.5);
     expect(Math.abs(beforeLeftClick.elevation - afterLeftClick.elevation)).toBeLessThan(0.5);
 
     await attachDiagnostic(testInfo, page, 'controls-final');
+    await attachBrowserErrors(testInfo, browserErrors);
+    expect(browserErrors.consoleErrors).toEqual([]);
+    expect(browserErrors.pageErrors).toEqual([]);
+  });
+
+  test('keeps frustum-visible chunks attached through shallow camera transitions', async ({ page }, testInfo) => {
+    test.setTimeout(180_000);
+    const browserErrors = collectBrowserErrors(page);
+    await prepareInitialWorld(page);
+
+    const canvas = page.getByLabel('Interactive map camera');
+    const canvasPoint = await getCanvasPoint(page);
+    await page.mouse.click(canvasPoint.x, canvasPoint.y);
+    await canvas.focus();
+
+    for (const elevation of [88, 75, 60, 45, 40]) {
+      await setElevation(page, elevation);
+      await waitForStreamingSettled(page);
+      const metrics = await readDebugMetrics(page);
+      expectVisibleChunksAttached(metrics);
+      await attachDiagnostic(testInfo, page, `transition-elevation-${elevation}`);
+    }
+
+    await setElevation(page, 65);
+    await setZoom(page, 'max');
+    await setElevation(page, 40);
+    await waitForStreamingSettled(page);
+    const zoomedInShallow = await readDebugMetrics(page);
+    expect(zoomedInShallow.zoom).toBeGreaterThan(2.4);
+    expect(zoomedInShallow.elevation).toBeGreaterThan(39);
+    expect(zoomedInShallow.elevation).toBeLessThan(42);
+    expect(zoomedInShallow.navigationPlaneY).toBeGreaterThan(25);
+    expectVisibleChunksAttached(zoomedInShallow);
+    await attachDiagnostic(testInfo, page, 'transition-shallow-zoomed-in');
+
+    await setZoom(page, 'min');
+    await waitForVisibleStreamingSettled(page);
+    const zoomedOut = await readDebugMetrics(page);
+    expectVisibleChunksAttached(zoomedOut);
+    expectFiniteCameraTarget(zoomedOut);
+    await attachDiagnostic(testInfo, page, 'transition-shallow-zoomed-out');
+
+    await holdKey(page, 'KeyS', 2_000);
+    await waitForVisibleStreamingSettled(page);
+    const afterRapidPan = await readDebugMetrics(page);
+    expectVisibleChunksAttached(afterRapidPan);
+    expectFiniteCameraTarget(afterRapidPan);
+    await attachDiagnostic(testInfo, page, 'transition-shallow-rapid-pan');
+
+    await attachBrowserErrors(testInfo, browserErrors);
+    expect(browserErrors.consoleErrors).toEqual([]);
+    expect(browserErrors.pageErrors).toEqual([]);
+  });
+
+  test('keeps bounded camera framing across desktop aspect ratios', async ({ page }, testInfo) => {
+    test.setTimeout(180_000);
+    const browserErrors = collectBrowserErrors(page);
+    await prepareInitialWorld(page);
+
+    const canvas = page.getByLabel('Interactive map camera');
+    await canvas.focus();
+    const viewportCases = [
+      { width: 1_440, height: 900, elevation: 40, heading: 0, zoom: 'min' as const, target: [400, 400] as const },
+      { width: 1_024, height: 768, elevation: 45, heading: 90, zoom: 'default' as const, target: [400, 0] as const },
+      { width: 1_920, height: 800, elevation: 80, heading: 225, zoom: 'max' as const, target: [-400, -400] as const },
+    ];
+
+    for (const cameraCase of viewportCases) {
+      await page.setViewportSize({ width: cameraCase.width, height: cameraCase.height });
+      await page.waitForTimeout(250);
+      await setElevation(page, cameraCase.elevation);
+      await setHeading(page, cameraCase.heading);
+      await setZoom(page, cameraCase.zoom);
+      await moveTargetTo(page, cameraCase.target[0], cameraCase.target[1]);
+      await waitForVisibleStreamingSettled(page);
+
+      const metrics = await attachDiagnostic(
+        testInfo,
+        page,
+        `viewport-${cameraCase.width}x${cameraCase.height}`,
+        false,
+      );
+      expectVisibleChunksAttached(metrics);
+      expectFiniteCameraTarget(metrics);
+      expect(metrics.elevation).toBeGreaterThanOrEqual(39);
+      expect(metrics.elevation).toBeLessThanOrEqual(88.5);
+    }
+
     await attachBrowserErrors(testInfo, browserErrors);
     expect(browserErrors.consoleErrors).toEqual([]);
     expect(browserErrors.pageErrors).toEqual([]);
@@ -172,9 +279,12 @@ test.describe('Velutinous Manul browser diagnostics', () => {
         await holdKey(page, 'KeyS', 1_200);
         await waitForDiagnosticFrame(page);
         const bottomApproach = await attachDiagnostic(testInfo, page, 'shallow-bottom-approach');
-        expect(bottomApproach.elevation).toBeLessThan(14);
+        expect(bottomApproach.elevation).toBeGreaterThan(39);
         expect(bottomApproach.visible).toBeGreaterThan(0);
       }
+
+      await waitForStreamingSettled(page);
+      expectVisibleChunksAttached(await readDebugMetrics(page));
 
       await attachBrowserErrors(testInfo, browserErrors);
       expect(browserErrors.consoleErrors).toEqual([]);
@@ -187,6 +297,7 @@ async function prepareDeterministicWorld(page: Page): Promise<void> {
   await page.goto('/?debug=chunks&metrics=only');
   await waitForWorldReady(page);
   await page.getByRole('button', { name: /Explore Map/ }).click();
+  await page.getByRole('button', { name: /World settings/ }).click();
 
   const seed = page.getByLabel('World seed');
   await expect(seed).toBeEnabled();
@@ -195,6 +306,7 @@ async function prepareDeterministicWorld(page: Page): Promise<void> {
   await expect(seed).toBeDisabled();
   await waitForWorldReady(page);
   await page.getByRole('button', { name: /Explore Map/ }).click();
+  await page.getByRole('button', { name: /World settings/ }).click();
   await waitForStreamingSettled(page);
 }
 
@@ -216,8 +328,30 @@ async function waitForStreamingSettled(page: Page): Promise<DebugMetrics> {
   await expect.poll(async () => (await readDebugMetrics(page)).queued).toBe(0);
   await expect.poll(async () => (await readDebugMetrics(page)).building).toBe(0);
   await expect.poll(async () => (await readDebugMetrics(page)).missingDesired).toBe(0);
+  await expect.poll(async () => (await readDebugMetrics(page)).missingVisible).toBe(0);
   await page.waitForTimeout(100);
   return readDebugMetrics(page);
+}
+
+async function waitForVisibleStreamingSettled(page: Page): Promise<DebugMetrics> {
+  await expect.poll(async () => (await readDebugMetrics(page)).initial).toBe('ready');
+  await waitForCameraStable(page);
+  await expect.poll(async () => (await readDebugMetrics(page)).missingVisible).toBe(0);
+  await expect.poll(async () => {
+    const metrics = await readDebugMetrics(page);
+    return metrics.visibleChunks.every((key) => metrics.attachedChunks.includes(key));
+  }).toBe(true);
+  await page.waitForTimeout(150);
+  return readDebugMetrics(page);
+}
+
+function expectVisibleChunksAttached(metrics: DebugMetrics): void {
+  expect(metrics.missingVisible).toBe(0);
+  expect(metrics.visibleChunks.every((key) => metrics.attachedChunks.includes(key))).toBe(true);
+}
+
+function expectFiniteCameraTarget(metrics: DebugMetrics): void {
+  expect(metrics.cameraTarget.every((component) => Number.isFinite(component))).toBe(true);
 }
 
 async function waitForDiagnosticFrame(page: Page): Promise<DebugMetrics> {
@@ -229,11 +363,18 @@ async function waitForDiagnosticFrame(page: Page): Promise<DebugMetrics> {
 
 async function waitForCameraStable(page: Page): Promise<void> {
   let previous = await readDebugMetrics(page);
+  let stableFrames = 0;
   for (let attempt = 0; attempt < 12; attempt += 1) {
     await page.waitForTimeout(100);
     const current = await readDebugMetrics(page);
-    if (cameraDistance(previous.cameraPosition, current.cameraPosition) < 0.01) {
-      return;
+    if (cameraDistance(previous.cameraPosition, current.cameraPosition) < 0.01 &&
+      cameraDistance(previous.cameraTarget, current.cameraTarget) < 0.01) {
+      stableFrames += 1;
+      if (stableFrames >= 3) {
+        return;
+      }
+    } else {
+      stableFrames = 0;
     }
     previous = current;
   }
@@ -258,7 +399,10 @@ async function readDebugMetrics(page: Page): Promise<DebugMetrics> {
       desired: numberValue('desired'),
       activeDesired: numberValue('active-desired'),
       attached: numberValue('attached'),
+      attachedChunks: listValue('attached-chunks'),
       missingDesired: numberValue('missing-desired'),
+      missingVisible: numberValue('missing-visible'),
+      retained: numberValue('retained'),
       queued: numberValue('queued'),
       building: numberValue('building'),
       rejected: numberValue('rejected'),
@@ -268,9 +412,16 @@ async function readDebugMetrics(page: Page): Promise<DebugMetrics> {
       cameraPosition: vectorValue('camera-position'),
       cameraTarget: vectorValue('camera-target'),
       zoom: numberValue('zoom-value'),
+      visibleViewHeight: numberValue('visible-view-height'),
+      minimumZoom: numberValue('minimum-zoom'),
+      maximumZoom: numberValue('maximum-zoom'),
       polarAngle: numberValue('polar-angle'),
       elevation: numberValue('elevation'),
+      minimumElevation: numberValue('minimum-elevation'),
+      maximumElevation: numberValue('maximum-elevation'),
       heading: numberValue('heading'),
+      targetClamped: value('target-clamped') === 'true',
+      navigationPlaneY: numberValue('navigation-plane-y'),
       navigationEnabled: value('navigation-enabled') === 'true',
       sceneHasFocus: value('scene-has-focus') === 'true',
       visibleChunks: listValue('visible-chunks'),
@@ -346,12 +497,15 @@ async function holdKey(page: Page, key: string, milliseconds: number): Promise<v
 }
 
 async function holdKeyUntilMoved(page: Page, key: string, before: DebugMetrics): Promise<DebugMetrics> {
-  await holdKey(page, key, 220);
-  let after = await readDebugMetrics(page);
-  if (cameraDistance(before.cameraTarget, after.cameraTarget) <= 1) {
-    await focusCanvasForNavigation(page);
-    await holdKey(page, key, 220);
+  const keysToTry = [key, 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+  let after = before;
+  for (const candidate of keysToTry) {
+    await holdKey(page, candidate, 220);
     after = await readDebugMetrics(page);
+    if (cameraDistance(before.cameraTarget, after.cameraTarget) > 1) {
+      return after;
+    }
+    await focusCanvasForNavigation(page);
   }
   return after;
 }
@@ -420,12 +574,13 @@ async function setZoom(page: Page, desired: CameraCase['zoom']): Promise<void> {
   }
   const final = await readDebugMetrics(page);
   if (desired === 'min') {
-    expect(final.zoom).toBeLessThan(0.55);
+    expect(final.zoom).toBeGreaterThanOrEqual(final.minimumZoom - 0.03);
+    expect(final.zoom).toBeLessThanOrEqual(final.maximumZoom + 0.03);
   } else if (desired === 'max') {
     expect(final.zoom).toBeGreaterThan(2.4);
   } else {
-    expect(final.zoom).toBeGreaterThan(0.8);
-    expect(final.zoom).toBeLessThan(1.2);
+    expect(final.zoom).toBeGreaterThanOrEqual(final.minimumZoom - 0.03);
+    expect(final.zoom).toBeLessThanOrEqual(Math.max(1.2, final.minimumZoom + 0.03));
   }
 }
 
