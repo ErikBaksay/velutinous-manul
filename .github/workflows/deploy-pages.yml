@@ -1,0 +1,71 @@
+name: Deploy Velutinous Manul to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test -- --watch=false --no-progress --browsers=ChromeHeadless
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Build production bundle
+        run: npm run build -- --configuration production --base-href "${{ steps.pages.outputs.base_path }}/"
+
+      - name: Validate Pages artifact
+        shell: bash
+        run: |
+          test -f dist/velutinous-manul/browser/index.html
+          test -f dist/velutinous-manul/browser/favicon.ico
+          test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name '*.js' -print -quit)"
+          test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name '*.css' -print -quit)"
+          test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name 'worker-*.js' -print -quit)"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/velutinous-manul/browser
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

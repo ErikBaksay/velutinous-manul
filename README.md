@@ -36,6 +36,14 @@ ng build
 
 This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
 
+## Deploying to GitHub Pages
+
+The repository includes a GitHub Actions workflow that builds and deploys the game to GitHub Pages whenever changes are pushed to `main`. It can also be started manually from the repository's **Actions** tab.
+
+Before the first deployment, set the repository's Pages publishing source to **GitHub Actions** under **Settings → Pages → Build and deployment**. The workflow publishes the game at:
+
+`https://erikbaksay.github.io/velutinous-manul/`
+
 ## Running unit tests
 
 To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
