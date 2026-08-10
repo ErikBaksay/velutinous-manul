@@ -31,7 +31,7 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: npm test -- --watch=false --no-progress --browsers=ChromeHeadless
+        run: npm test -- --watch=false --no-progress --browsers=ChromeHeadlessNoSandbox
 
       - name: Configure GitHub Pages
         id: pages
