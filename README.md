@@ -54,13 +54,20 @@ ng test
 
 ## Running end-to-end tests
 
-For end-to-end (e2e) testing, run:
+Install the bundled Chromium browser once, then run the Playwright browser suite:
 
 ```bash
-ng e2e
+npx playwright install chromium
+npm run e2e
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+The suite starts or reuses the Angular development server at `http://127.0.0.1:4200` and uses a fixed 1440×900 viewport. To watch the tests in a browser, run `npm run e2e:headed`. Automated chunk investigation uses `?debug=chunks&metrics=only` for machine-readable diagnostics without rebuilding wireframe boxes during every camera sweep; use plain `?debug=chunks` for the full manual wireframe review. Screenshots, traces, videos, and metric attachments are written to ignored Playwright test artifacts.
+
+To type-check the Playwright configuration and tests without running them:
+
+```bash
+npm run typecheck:e2e
+```
 
 ## Additional Resources
 

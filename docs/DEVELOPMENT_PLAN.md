@@ -411,3 +411,14 @@ The second revised sunset concept is the approved visual target. It defines the 
 - The shallow-angle chunk disappearance remains intentionally deferred.
 - `npm run build`, both TypeScript checks, and `git diff --check` pass. Karma remains environment-blocked at port 9876.
 - No files were staged, committed, or pushed by the assistant.
+
+### 2026-08-10 — Playwright chunk-visibility investigation
+
+- Added Chromium Playwright configuration with a fixed 1440×900 viewport, Angular server reuse/startup, SwiftShader WebGL fallback, serial execution, and failure screenshots/traces/videos.
+- Added deterministic browser coverage for seed `VM-START-001`, generation-overlay input locking, WASD/arrows, middle-button orbit, right-button pan, wheel zoom, left-click no-op behavior, post-generation exploration, browser error collection, and chunk-streaming consistency.
+- Captured the requested reset, shallow, mid-angle, steep, edge, diagonal, and corner camera states with actual browser input events, plus the separate shallow-angle backward movement state. Each state records camera and chunk coordinate data attributes as JSON/text attachments and attempts a deterministic screenshot; no pixel baselines or disappearance assertions were added.
+- Extended only the existing `?debug=chunks` path with machine-readable camera state and chunk metrics. `?debug=chunks&metrics=only` is used by automation to avoid wireframe churn; the full debug view remains available for manual visual inspection.
+- Validation: `npx tsc -p tsconfig.app.json --noEmit`, `npm run typecheck:e2e`, `npm run e2e` (12 passed), `npm run build`, and `git diff --check` pass. Chromium was installed locally with `npx playwright install chromium`.
+- Automated metrics showed broad max-zoom-out views can carry a substantial queued/missing-desired backlog while the active desired set is larger than the attached set. This is evidence for a streaming-readiness/coverage investigation, not proof of the shallow-angle disappearance cause.
+- Manual review remains pending at 1440×900 using `?debug=chunks`, the fixed seed, and the same camera matrix. The shallow-angle cutoff remains intentionally deferred; no camera, frustum, clipping, streaming, or rendering fix was implemented.
+- No files were staged, committed, or pushed by the assistant.

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CameraDebugState } from './camera-controller';
 import {
   ChunkBudgetReport,
   measureRepresentativeChunkBudgets,
@@ -27,9 +28,12 @@ export class ChunkDebugVisualizer {
   private readonly rejectedMaterial = createLineMaterial(0xe17868);
   private readonly metricsElement: HTMLPreElement;
   private readonly budgetReport: ChunkBudgetReport;
+  private readonly metricsOnly: boolean;
   private lastSignature = '';
 
   constructor(scene: THREE.Scene, host: HTMLElement) {
+    this.metricsOnly = typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('metrics') === 'only';
     this.group.name = 'chunk-stream-debug';
     this.visibleGroup.name = 'visible-chunks';
     this.prefetchGroup.name = 'prefetch-chunks';
@@ -47,6 +51,8 @@ export class ChunkDebugVisualizer {
 
     this.metricsElement = document.createElement('pre');
     this.metricsElement.className = 'chunk-stream-debug-metrics';
+    this.metricsElement.dataset['testid'] = 'chunk-stream-debug-metrics';
+    this.metricsElement.setAttribute('aria-label', 'Chunk streaming diagnostics');
     this.metricsElement.style.cssText = [
       'position:absolute',
       'top:24px',
@@ -65,9 +71,13 @@ export class ChunkDebugVisualizer {
     host.append(this.metricsElement);
   }
 
-  update(selection: ChunkViewSelection, diagnostics: ChunkStreamingDiagnostics): void {
+  update(
+    selection: ChunkViewSelection,
+    diagnostics: ChunkStreamingDiagnostics,
+    camera: CameraDebugState,
+  ): void {
     const signature = createChunkSelectionSignature(selection);
-    if (signature !== this.lastSignature) {
+    if (!this.metricsOnly && signature !== this.lastSignature) {
       this.replaceChunkLines(this.visibleGroup, selection.visible, this.visibleMaterial);
       const rejectedKeys = new Set(selection.rejected.map(chunkKey));
       this.replaceChunkLines(
@@ -79,6 +89,9 @@ export class ChunkDebugVisualizer {
       this.lastSignature = signature;
     }
 
+    const activeDesiredCount = selection.desired.length - selection.rejected.length;
+    const missingDesiredCount = Math.max(activeDesiredCount - diagnostics.attachedCount, 0);
+    const frustumCulledCount = Math.max(selection.candidateCount - selection.visible.length, 0);
     const budgetMessage = selection.budgetState === 'within-budget'
       ? `tuning (${INITIAL_DESIRED_CHUNK_BUDGET} desired)`
       : selection.budgetState === 'prefetch-over-budget'
@@ -86,15 +99,18 @@ export class ChunkDebugVisualizer {
         : 'visible set exceeds initial budget';
     this.metricsElement.textContent = [
       'CHUNK STREAMING DEBUG',
-      `visible:    ${selection.visible.length}`,
+      `visible:    ${selection.visible.length} (frustum)`,
       `prefetch:   ${selection.prefetch.length}`,
       `desired:    ${selection.desired.length}`,
+      `active:     ${activeDesiredCount}`,
       `attached:   ${diagnostics.attachedCount}`,
+      `missing:    ${missingDesiredCount}`,
       `retained:   ${diagnostics.retainedCount}`,
       `queued:     ${diagnostics.queuedCount}`,
       `building:   ${diagnostics.inFlightCount}`,
-      `rejected:   ${selection.rejected.length}`,
+      `rejected:   ${selection.rejected.length} (budget)`,
       `candidates: ${selection.candidateCount}`,
+      `culled:     ${frustumCulledCount} (candidate bounds)`,
       `peak view:  ${diagnostics.peakVisibleCount}`,
       `last build: ${formatMilliseconds(diagnostics.lastBundleBuildMs)}`,
       `rolling:    ${formatMilliseconds(diagnostics.rollingBundleBuildMs)}`,
@@ -104,7 +120,38 @@ export class ChunkDebugVisualizer {
       `prefetch:   ${CHUNK_PREFETCH_RADIUS}-chunk ring`,
       `map epoch:  ${diagnostics.mapEpoch}`,
       `initial:    ${diagnostics.initialReady ? 'ready' : 'streaming'}`,
+      `camera:     ${formatVector(camera.position)}`,
+      `target:     ${formatVector(camera.target)}`,
+      `zoom:       ${camera.zoom.toFixed(4)}`,
+      `polar:      ${camera.polarAngleDegrees.toFixed(2)}°`,
+      `elevation:  ${camera.elevationDegrees.toFixed(2)}°`,
+      `heading:    ${camera.headingDegrees.toFixed(2)}°`,
+      `input:      navigation ${camera.navigationEnabled ? 'enabled' : 'locked'}, focus ${camera.sceneHasFocus ? 'yes' : 'no'}`,
     ].join('\n');
+
+    this.metricsElement.dataset['visible'] = String(selection.visible.length);
+    this.metricsElement.dataset['prefetch'] = String(selection.prefetch.length);
+    this.metricsElement.dataset['desired'] = String(selection.desired.length);
+    this.metricsElement.dataset['activeDesired'] = String(activeDesiredCount);
+    this.metricsElement.dataset['attached'] = String(diagnostics.attachedCount);
+    this.metricsElement.dataset['missingDesired'] = String(missingDesiredCount);
+    this.metricsElement.dataset['queued'] = String(diagnostics.queuedCount);
+    this.metricsElement.dataset['building'] = String(diagnostics.inFlightCount);
+    this.metricsElement.dataset['rejected'] = String(selection.rejected.length);
+    this.metricsElement.dataset['candidates'] = String(selection.candidateCount);
+    this.metricsElement.dataset['frustumCulled'] = String(frustumCulledCount);
+    this.metricsElement.dataset['initial'] = diagnostics.initialReady ? 'ready' : 'streaming';
+    this.metricsElement.dataset['visibleChunks'] = selection.visible.map(chunkKey).join(',');
+    this.metricsElement.dataset['prefetchChunks'] = selection.prefetch.map(chunkKey).join(',');
+    this.metricsElement.dataset['rejectedChunks'] = selection.rejected.map(chunkKey).join(',');
+    this.metricsElement.dataset['cameraPosition'] = formatVector(camera.position);
+    this.metricsElement.dataset['cameraTarget'] = formatVector(camera.target);
+    this.metricsElement.dataset['zoomValue'] = String(camera.zoom);
+    this.metricsElement.dataset['polarAngle'] = String(camera.polarAngleDegrees);
+    this.metricsElement.dataset['elevation'] = String(camera.elevationDegrees);
+    this.metricsElement.dataset['heading'] = String(camera.headingDegrees);
+    this.metricsElement.dataset['navigationEnabled'] = String(camera.navigationEnabled);
+    this.metricsElement.dataset['sceneHasFocus'] = String(camera.sceneHasFocus);
   }
 
   dispose(): void {
@@ -137,6 +184,10 @@ export class ChunkDebugVisualizer {
 
 function formatMilliseconds(milliseconds: number | null): string {
   return milliseconds === null ? '—' : `${milliseconds.toFixed(2)} ms`;
+}
+
+function formatVector(vector: readonly [number, number, number]): string {
+  return vector.map((component) => component.toFixed(2)).join(',');
 }
 
 function createLineMaterial(color: number): THREE.LineBasicMaterial {

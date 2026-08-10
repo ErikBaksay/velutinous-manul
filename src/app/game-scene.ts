@@ -115,6 +115,7 @@ export class GameScene {
       this.chunkDebugVisualizer.update(
         currentSelection,
         this.chunkStreamingManager.getDiagnostics(),
+        this.cameraController.getDebugState(),
       );
     }
     this.renderer.render(this.scene, this.camera);

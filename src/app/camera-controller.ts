@@ -7,6 +7,17 @@ export const BASE_CAMERA_VIEW_HEIGHT = 128;
 export const MIN_CAMERA_VIEW_HEIGHT = 48;
 export const MAX_CAMERA_VIEW_HEIGHT = 320;
 
+export interface CameraDebugState {
+  readonly position: readonly [number, number, number];
+  readonly target: readonly [number, number, number];
+  readonly zoom: number;
+  readonly polarAngleDegrees: number;
+  readonly elevationDegrees: number;
+  readonly headingDegrees: number;
+  readonly navigationEnabled: boolean;
+  readonly sceneHasFocus: boolean;
+}
+
 const MIN_CAMERA_ZOOM = BASE_CAMERA_VIEW_HEIGHT / MAX_CAMERA_VIEW_HEIGHT;
 const MAX_CAMERA_ZOOM = BASE_CAMERA_VIEW_HEIGHT / MIN_CAMERA_VIEW_HEIGHT;
 const MIN_POLAR_ANGLE = THREE.MathUtils.degToRad(2);
@@ -112,6 +123,22 @@ export class CameraController {
     }
   }
 
+  getDebugState(): CameraDebugState {
+    const polarAngleDegrees = THREE.MathUtils.radToDeg(this.controls.getPolarAngle());
+    return {
+      position: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+      target: [this.controls.target.x, this.controls.target.y, this.controls.target.z],
+      zoom: this.camera.zoom,
+      polarAngleDegrees,
+      elevationDegrees: 90 - polarAngleDegrees,
+      headingDegrees: normalizeHeadingDegrees(
+        -THREE.MathUtils.radToDeg(this.controls.getAzimuthalAngle()),
+      ),
+      navigationEnabled: this.navigationEnabled,
+      sceneHasFocus: this.sceneHasFocus,
+    };
+  }
+
   reset(targetX: number, targetZ: number): void {
     this.controls.target.set(targetX, CAMERA_NAVIGATION_PLANE_Y, targetZ);
     this.camera.position
@@ -185,4 +212,8 @@ function isEditableTarget(target: EventTarget | null): boolean {
     target.isContentEditable ||
     target.matches('input, textarea, select, button, [contenteditable="true"]')
   );
+}
+
+function normalizeHeadingDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
 }
