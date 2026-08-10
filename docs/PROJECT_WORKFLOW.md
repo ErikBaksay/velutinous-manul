@@ -41,7 +41,14 @@ The attached visual is an approximate reference. It establishes mood, compositio
 - The assistant may inspect Git state and report what is ready for review.
 - The user decides whether and when to stage, commit, or push.
 
-If the user asks whether staged changes are safe or ready to be committed, pushed, or otherwise finalized—including wording such as “can I push the staged changes?”—inspect the staged and unstaged state separately, report the review status, and always include a suggested commit message for the reviewed changes. The assistant should not perform the commit or push unless the user separately and explicitly authorizes that action.
+If the user asks whether staged changes are safe or ready to be committed, pushed, or otherwise finalized—including wording such as “can I push the staged changes?”—follow this order:
+
+1. Give the suggested commit message for the reviewed changes first.
+2. Inspect the staged and unstaged state separately and identify anything that would be omitted from the proposed commit.
+3. Run the relevant local pipeline before giving the push-readiness approval. For Pages deployment changes, this means running the CI test profile with headless Chrome, the production build with the Pages base path, and the generated artifact checks. If the required local browser or tooling is unavailable, report that verification is incomplete instead of calling the changes safe and ready.
+4. Report the final review status and any remaining user action.
+
+The assistant must not stage, commit, or push files unless the user separately and explicitly authorizes that action.
 
 ## File ownership and documentation
 

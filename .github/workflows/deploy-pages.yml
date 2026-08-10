@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           test -f dist/velutinous-manul/browser/index.html
-          test -f dist/velutinous-manul/browser/favicon.ico
+          test -f dist/velutinous-manul/browser/velutinous-manul.png
           test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name '*.js' -print -quit)"
           test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name '*.css' -print -quit)"
           test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name 'worker-*.js' -print -quit)"

@@ -14,14 +14,17 @@ describe('CameraController', () => {
 
   beforeEach(() => {
     canvas = document.createElement('canvas');
+    canvas.tabIndex = 0;
     canvas.width = 800;
     canvas.height = 600;
+    document.body.append(canvas);
     camera = new THREE.OrthographicCamera(-64, 64, 64, -64, 0.1, 500);
     controller = new CameraController(camera, canvas);
   });
 
   afterEach(() => {
     controller.dispose();
+    canvas.remove();
   });
 
   it('resets the camera around the fixed navigation plane', () => {
@@ -41,9 +44,14 @@ describe('CameraController', () => {
 
   it('moves continuously with focused keyboard input only when enabled', () => {
     canvas.focus();
+    canvas.dispatchEvent(new Event('pointerdown'));
     controller.setNavigationEnabled(true);
     const initialX = camera.position.x;
-    const event = new KeyboardEvent('keydown', { code: 'KeyW', bubbles: true });
+    const event = new KeyboardEvent('keydown', {
+      code: 'KeyW',
+      bubbles: true,
+      cancelable: true,
+    });
     window.dispatchEvent(event);
 
     controller.update(1 / 60);
