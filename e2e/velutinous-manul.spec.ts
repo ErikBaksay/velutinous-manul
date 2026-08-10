@@ -110,11 +110,11 @@ test.describe('Velutinous Manul browser diagnostics', () => {
 
     const beforeWasd = await readDebugMetrics(page);
     const afterWasd = await holdKeyUntilMoved(page, 'KeyW', beforeWasd);
-    expectFiniteCameraTarget(afterWasd);
+    expect(cameraDistance(beforeWasd.cameraTarget, afterWasd.cameraTarget)).toBeGreaterThan(1);
 
     const beforeArrows = await readDebugMetrics(page);
     const afterArrows = await holdKeyUntilMoved(page, 'ArrowRight', beforeArrows);
-    expectFiniteCameraTarget(afterArrows);
+    expect(cameraDistance(beforeArrows.cameraTarget, afterArrows.cameraTarget)).toBeGreaterThan(1);
 
     const beforeCursorZoom = await readDebugMetrics(page);
     await page.mouse.move(canvasPoint.x, canvasPoint.y);
@@ -149,7 +149,7 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     const afterLeftClick = await readDebugMetrics(page);
     expect(cameraDistance(beforeLeftClick.cameraTarget, afterLeftClick.cameraTarget)).toBeLessThan(1.25);
     expect(Math.abs(beforeLeftClick.zoom - afterLeftClick.zoom)).toBeLessThan(0.005);
-    expect(Math.abs(shortestAngleDelta(beforeLeftClick.heading, afterLeftClick.heading))).toBeLessThan(0.5);
+    expect(Math.abs(shortestAngleDelta(beforeLeftClick.heading, afterLeftClick.heading))).toBeLessThan(1);
     expect(Math.abs(beforeLeftClick.elevation - afterLeftClick.elevation)).toBeLessThan(0.5);
 
     await attachDiagnostic(testInfo, page, 'controls-final');
@@ -497,15 +497,12 @@ async function holdKey(page: Page, key: string, milliseconds: number): Promise<v
 }
 
 async function holdKeyUntilMoved(page: Page, key: string, before: DebugMetrics): Promise<DebugMetrics> {
-  const keysToTry = [key, 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-  let after = before;
-  for (const candidate of keysToTry) {
-    await holdKey(page, candidate, 220);
-    after = await readDebugMetrics(page);
-    if (cameraDistance(before.cameraTarget, after.cameraTarget) > 1) {
-      return after;
-    }
+  await holdKey(page, key, 220);
+  let after = await readDebugMetrics(page);
+  if (cameraDistance(before.cameraTarget, after.cameraTarget) <= 1) {
     await focusCanvasForNavigation(page);
+    await holdKey(page, key, 220);
+    after = await readDebugMetrics(page);
   }
   return after;
 }

@@ -1,7 +1,13 @@
 <main #sceneFrame class="scene-frame" aria-label="Velutinous Manul world creation" [attr.aria-busy]="isGenerating">
   <canvas #gameCanvas tabindex="0" aria-label="Interactive map camera"></canvas>
 
-  <section class="creation-dock" [class.is-hidden]="isExploring && !isDockOpen" aria-labelledby="creation-title">
+  <section
+    class="creation-dock"
+    [class.is-hidden]="isExploring && !isDockOpen"
+    [attr.aria-hidden]="isExploring && !isDockOpen"
+    [attr.inert]="isExploring && !isDockOpen ? '' : null"
+    aria-labelledby="creation-title"
+  >
     <div class="dock-header">
       @if (isExploring) {
         <button class="dock-close" type="button" aria-label="Hide world settings" (click)="closeDock()">×</button>

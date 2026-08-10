@@ -316,6 +316,10 @@ export class CameraController {
     if (!this.constraints) {
       this.minimumZoom = MIN_CAMERA_ZOOM;
       this.controls.minZoom = this.minimumZoom;
+      if (this.camera.zoom < this.minimumZoom) {
+        this.camera.zoom = this.minimumZoom;
+        this.camera.updateProjectionMatrix();
+      }
       return;
     }
 

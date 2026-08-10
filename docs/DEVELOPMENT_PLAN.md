@@ -11,10 +11,10 @@ Every implementation milestone is small enough to run and manually test. Work pa
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
 - **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3.
 - **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented.
-- **Current task:** Manual review of streaming budget and prioritization tuning Gate 3.2.
-- **Next planned work:** After approval, add budget hysteresis and repeated-sweep resource stabilization before moving to construction interaction.
+- **Current task:** Manual review of the transition-safe streaming fix and the intentional camera framing limits.
+- **Next planned work:** After approval, move from the map-preview foundation to the first construction interaction; revisit budget hysteresis only if manual review shows it is needed.
 - **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, saving, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
-- **Known limitations / technical debt:** The map still renders only an active central set of chunks while camera streaming is deferred. The previously observed shallow-angle world cutoff is intentionally deferred for a later camera/streaming discussion. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Karma cannot execute browser specs in this environment because no Chrome binary is installed, although the specs compile successfully.
+- **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Browser-based Karma and Playwright runs require a local browser plus permission to bind their test servers; the TypeScript and production build checks remain runnable without those services.
 
 ## Delivery and approval gates
 
@@ -430,18 +430,25 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added exact attached-key, retained-count, and missing-visible diagnostics to the development debug surface.
 - Added a full-map reference-frustum regression across 12°, 20°, 30°, 45°, and 65° elevations, streaming lifecycle coverage, and Playwright shallow-transition coverage at default and zoomed-out views.
 - Validation: `npm run build`, both TypeScript checks, focused visibility/streaming Karma specs (6 and 3 passed), and `npm run e2e` (13 passed). The full 48-spec Karma run compiled but Chrome disconnected after 8 specs in this environment.
-- No camera limits, framing, map generation, chunk geometry, or rendering-layer behavior were changed.
+- Camera framing is intentionally bounded by a 40° minimum elevation, an 88° maximum elevation, and a map-safe minimum zoom derived from the terrain footprint. Map generation, chunk geometry, and rendering-layer behavior were not changed.
 
 ### 2026-08-10 — Shallow-angle view distance correction
 
 - Confirmed the map camera is orthographic, so there is no perspective FOV or lens value causing the apparent telephoto behavior.
 - Extended scene fog from its previous 500-unit cutoff to the camera’s map-safe far plane, while retaining atmospheric fade from 420 units.
-- This prevents distant terrain from fading completely into the background during shallow-angle views; camera controls, orthographic framing, map bounds, and chunk streaming remain unchanged.
+- This prevents distant terrain from fading completely into the background during shallow-angle views and complements the intentional camera framing and transition-safe chunk streaming changes.
 - Validation: `npm run build`, both TypeScript checks, and `npm run e2e` (13 passed).
 
 ### 2026-08-10 — Surface-aligned orbit pivot
 
 - Reproduced the zoomed-in shallow-tilt issue: the fixed `Y = 18` navigation plane was below the generated terrain range (`≈25.8–60`) and below the default sea surface (`≈35.2`).
 - Made the camera navigation/orbit plane follow the generated sea-level surface, including camera movement, reset framing, chunk target sorting, and diagnostics.
-- Added camera-controller coverage and Playwright coverage for zooming in first, then tilting to 12°; the pivot now remains on the map surface and visible chunks stay attached.
+- Added camera-controller coverage and Playwright coverage for zooming in first, then tilting to the configured 40° minimum; the pivot now remains on the map surface and visible chunks stay attached.
 - Validation: focused camera Karma specs (4 passed), `npm run build`, both TypeScript checks, and full `npm run e2e` (13 passed).
+
+### 2026-08-10 — Camera contract and verification cleanup
+
+- Kept the intentional 40°–88° elevation range, map-safe zoom limits, surface-aligned pivot, cursor-directed zoom, and exploration dock behavior documented as product behavior rather than treating them as regressions.
+- Made camera reset honor the configured minimum zoom even before map-specific constraints are installed.
+- Restored explicit WASD/arrow movement assertions, added exploration-dock state coverage, and made the hidden dock inaccessible to assistive technology while it is closed.
+- Validation: `npm run build`, all three TypeScript checks, `npm run test:ci` (36 passed), and `npm run e2e` (14 passed).

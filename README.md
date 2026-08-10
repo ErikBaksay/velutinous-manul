@@ -14,6 +14,18 @@ ng serve
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
 
+## Camera controls
+
+After selecting **Explore Map**:
+
+- Use **WASD** or the **arrow keys** to move across the map.
+- Drag with the **middle mouse button** to orbit and the **right mouse button** to pan.
+- Use the **mouse wheel** to zoom toward the cursor. Left-clicking does not change the camera.
+
+The camera intentionally stays between 40° and 88° elevation and uses a map-safe zoom range. Its orbit pivot follows the generated sea surface, keeping the framing aligned with the active world.
+
+The world-settings dock can be hidden while exploring and reopened with the **World settings** button.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:

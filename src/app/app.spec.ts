@@ -63,9 +63,18 @@ describe('App', () => {
     app.overlayState = 'complete';
     app.exploreMap();
     expect(app.overlayState).toBe('hidden');
+    expect(app.isExploring).toBeTrue();
+    expect(app.isDockOpen).toBeFalse();
+
+    app.openDock();
+    expect(app.isDockOpen).toBeTrue();
+    app.closeDock();
+    expect(app.isDockOpen).toBeFalse();
 
     app.overlayState = 'error';
     app.editSettings();
     expect(app.overlayState).toBe('hidden');
+    expect(app.isExploring).toBeTrue();
+    expect(app.isDockOpen).toBeTrue();
   });
 });

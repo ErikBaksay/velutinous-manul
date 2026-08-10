@@ -48,6 +48,7 @@ canvas:focus-visible {
 
 .creation-dock.is-hidden {
   pointer-events: none;
+  visibility: hidden;
   transform: translateX(calc(-100% - 36px));
   opacity: 0;
 }
