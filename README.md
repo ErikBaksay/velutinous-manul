@@ -52,6 +52,14 @@ To execute unit tests with the [Karma](https://karma-runner.github.io) test runn
 ng test
 ```
 
+The full test command includes the production-size map-generation tests. GitHub Pages uses a faster CI profile that keeps the application and rendering tests but excludes the six full-resolution map-generation suites, which can block a headless browser for longer than Karma's activity timeout:
+
+```bash
+npm run test:ci
+```
+
+The excluded map-generation tests remain available through the regular `ng test` command for local validation.
+
 ## Running end-to-end tests
 
 Install the bundled Chromium browser once, then run the Playwright browser suite:

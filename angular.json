@@ -88,6 +88,21 @@
             "styles": [
               "src/styles.css"
             ]
+          },
+          "configurations": {
+            "ci": {
+              "watch": false,
+              "progress": false,
+              "browsers": "ChromeHeadlessNoSandbox",
+              "exclude": [
+                "src/app/map/terrain-generation.spec.ts",
+                "src/app/map/water-generation.spec.ts",
+                "src/app/map/hydrology-generation.spec.ts",
+                "src/app/map/biome-generation.spec.ts",
+                "src/app/map/resource-generation.spec.ts",
+                "src/app/map/starting-basin-generation.spec.ts"
+              ]
+            }
           }
         }
       }

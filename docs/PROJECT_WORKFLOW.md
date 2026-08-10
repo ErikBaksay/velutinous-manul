@@ -41,7 +41,7 @@ The attached visual is an approximate reference. It establishes mood, compositio
 - The assistant may inspect Git state and report what is ready for review.
 - The user decides whether and when to stage, commit, or push.
 
-If the user asks whether staged changes are ready to be committed or pushed, report the review status and include a proposed commit message. The assistant should not perform the commit or push unless the user separately and explicitly authorizes that action.
+If the user asks whether staged changes are safe or ready to be committed, pushed, or otherwise finalized—including wording such as “can I push the staged changes?”—inspect the staged and unstaged state separately, report the review status, and always include a suggested commit message for the reviewed changes. The assistant should not perform the commit or push unless the user separately and explicitly authorizes that action.
 
 ## File ownership and documentation
 
