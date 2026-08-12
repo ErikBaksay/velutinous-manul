@@ -20,7 +20,7 @@ describe('ChunkStreamingManager', () => {
     await ready;
 
     const diagnostics = manager.getDiagnostics();
-    expect(diagnostics.initialReady).toBeTrue();
+    expect(diagnostics.initialReady).toBe(true);
     expect(diagnostics.attachedCount).toBeGreaterThanOrEqual(1);
     expect(diagnostics.queuedCount).toBeGreaterThanOrEqual(0);
     manager.destroy();
@@ -75,14 +75,14 @@ describe('ChunkStreamingManager', () => {
     const nextDesired = new Set(selection.desired.map((chunk) => `${chunk.x}:${chunk.y}`));
     const outgoing = [...previousAttached].filter((key) => !nextDesired.has(key));
     expect(outgoing.length).toBeGreaterThan(0);
-    expect(outgoing.some((key) => transitioned.attachedKeys.includes(key))).toBeTrue();
+    expect(outgoing.some((key) => transitioned.attachedKeys.includes(key))).toBe(true);
     expect(transitioned.retainedCount).toBeGreaterThan(0);
     expect(transitioned.retainedCount).toBeLessThanOrEqual(INITIAL_DESIRED_CHUNK_BUDGET);
 
     runFrames(manager, camera, 240);
     const settled = manager.getDiagnostics();
     expect(settled.retainedCount).toBe(0);
-    expect(selection.visible.every((chunk) => settled.attachedKeys.includes(`${chunk.x}:${chunk.y}`))).toBeTrue();
+    expect(selection.visible.every((chunk) => settled.attachedKeys.includes(`${chunk.x}:${chunk.y}`))).toBe(true);
     expect(settled.queuedCount).toBe(0);
     expect(settled.inFlightCount).toBe(0);
     expect(settled.buildBudgetMs).toBe(STREAMING_BUILD_BUDGET_MS);

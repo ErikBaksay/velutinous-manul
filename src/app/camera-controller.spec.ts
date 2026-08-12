@@ -52,7 +52,7 @@ describe('CameraController', () => {
 
     expect(controller.getDebugState().target[0]).toBeCloseTo(400);
     expect(controller.getDebugState().target[2]).toBeCloseTo(400);
-    expect(controller.getDebugState().targetClamped).toBeFalse();
+    expect(controller.getDebugState().targetClamped).toBe(false);
   });
 
   it('raises the minimum zoom when a low-angle footprint cannot fit', () => {
@@ -96,7 +96,7 @@ describe('CameraController', () => {
     controller.update(1 / 60);
     window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
 
-    expect(event.defaultPrevented).toBeTrue();
+    expect(event.defaultPrevented).toBe(true);
     expect(camera.position.x).not.toBe(initialX);
 
     const movedX = camera.position.x;

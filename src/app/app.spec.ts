@@ -44,7 +44,7 @@ describe('App', () => {
     ];
 
     expect(phases.map(getGenerationMilestoneIndex)).toEqual([0, 0, 0, 1, 1, 2, 3, 4, 4, 4]);
-    expect(phases.every((phase) => getPlayerFacingDetail(phase).length > 0)).toBeTrue();
+    expect(phases.every((phase) => getPlayerFacingDetail(phase).length > 0)).toBe(true);
   });
 
   it('normalizes progress and formats completion summary values', () => {
@@ -63,18 +63,18 @@ describe('App', () => {
     app.overlayState = 'complete';
     app.exploreMap();
     expect(app.overlayState).toBe('hidden');
-    expect(app.isExploring).toBeTrue();
-    expect(app.isDockOpen).toBeFalse();
+    expect(app.isExploring).toBe(true);
+    expect(app.isDockOpen).toBe(false);
 
     app.openDock();
-    expect(app.isDockOpen).toBeTrue();
+    expect(app.isDockOpen).toBe(true);
     app.closeDock();
-    expect(app.isDockOpen).toBeFalse();
+    expect(app.isDockOpen).toBe(false);
 
     app.overlayState = 'error';
     app.editSettings();
     expect(app.overlayState).toBe('hidden');
-    expect(app.isExploring).toBeTrue();
-    expect(app.isDockOpen).toBeTrue();
+    expect(app.isExploring).toBe(true);
+    expect(app.isDockOpen).toBe(true);
   });
 });

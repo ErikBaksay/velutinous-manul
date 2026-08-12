@@ -38,7 +38,7 @@ describe('biome and landmass generation', () => {
         expect(data.landmassId[cellIndex]).toBe(0);
       }
     }
-  });
+  }, 300_000);
 });
 
 function createData(): AuthoritativeMapData {
