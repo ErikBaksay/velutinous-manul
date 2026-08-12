@@ -7,17 +7,23 @@ import {
   LogicalChunkCoordinate,
   selectChunksForView,
 } from './chunk-visibility';
-import { CameraNavigationState } from './camera-controller';
+import { CAMERA_NAVIGATION_PLANE_Y, CameraNavigationState } from './camera-controller';
 import {
   DepositChunkObjects,
   DepositChunkRenderer,
 } from './deposit-chunk-renderer';
-import { ForestChunkRenderer } from './forest-chunk-renderer';
+import {
+  EnvironmentChunkObjects,
+  EnvironmentChunkRenderer,
+} from './environment-chunk-renderer';
 import { AuthoritativeMapData } from './map/map-types';
+import { getRenderQualitySettings, RenderQualitySettings } from './render-quality';
 import { TerrainChunkRenderer } from './terrain-chunk-renderer';
-import { WaterChunkRenderer } from './water-chunk-renderer';
+import { VisualAssetRegistry } from './visual-asset-registry';
+import { WaterChunkObjects, WaterChunkRenderer } from './water-chunk-renderer';
 
 export const STREAMING_BUILD_BUDGET_MS = 4;
+const CHUNK_DEBUG_BUILD_BUDGET_MS = 16;
 const MAX_RETAINED_CHUNKS = INITIAL_DESIRED_CHUNK_BUDGET;
 
 export type ChunkLifecycleState =
@@ -43,13 +49,14 @@ export interface ChunkStreamingDiagnostics {
   readonly buildBudgetMs: number;
   readonly initialDesiredBudget: number;
   readonly selectionRevision: number;
+  readonly environmentInstanceCount: number;
 }
 
 interface ChunkBundle {
   readonly coordinate: LogicalChunkCoordinate;
   readonly terrain: THREE.Mesh;
-  readonly water: THREE.Mesh | null;
-  readonly forest: THREE.InstancedMesh | null;
+  readonly water: WaterChunkObjects | null;
+  readonly environment: EnvironmentChunkObjects | null;
   readonly deposits: DepositChunkObjects;
 }
 
@@ -61,6 +68,17 @@ interface ChunkRecord {
   retainedSinceRevision?: number;
 }
 
+interface ChunkBuildState {
+  readonly entry: QueueEntry;
+  readonly record: ChunkRecord;
+  readonly startedAt: number;
+  stage: 0 | 1 | 2 | 3;
+  terrain?: THREE.Mesh;
+  water?: WaterChunkObjects | null;
+  environment?: EnvironmentChunkObjects | null;
+  deposits?: DepositChunkObjects;
+}
+
 interface QueueEntry {
   readonly epoch: number;
   readonly viewRevision: number;
@@ -69,9 +87,12 @@ interface QueueEntry {
 
 export class ChunkStreamingManager {
   private readonly scene: THREE.Scene;
+  private readonly visualAssetRegistry: VisualAssetRegistry;
+  private readonly ownsVisualAssetRegistry: boolean;
+  private readonly quality: RenderQualitySettings;
   private terrainRenderer: TerrainChunkRenderer | null = null;
   private waterRenderer: WaterChunkRenderer | null = null;
-  private forestRenderer: ForestChunkRenderer | null = null;
+  private environmentRenderer: EnvironmentChunkRenderer | null = null;
   private depositRenderer: DepositChunkRenderer | null = null;
   private readonly records = new Map<string, ChunkRecord>();
   private queue: QueueEntry[] = [];
@@ -90,13 +111,22 @@ export class ChunkStreamingManager {
   private lastBundleBuildMs: number | null = null;
   private rollingBundleBuildMs: number | null = null;
   private peakVisibleCount = 0;
+  private activeBuild: ChunkBuildState | null = null;
 
-  constructor(scene: THREE.Scene) {
+  constructor(
+    scene: THREE.Scene,
+    visualAssetRegistry?: VisualAssetRegistry,
+    quality: RenderQualitySettings = getRenderQualitySettings(),
+  ) {
     this.scene = scene;
+    this.visualAssetRegistry = visualAssetRegistry ?? new VisualAssetRegistry();
+    this.ownsVisualAssetRegistry = visualAssetRegistry === undefined;
+    this.quality = quality;
   }
 
   beginMap(data: AuthoritativeMapData, seaLevelSample: number): void {
     this.mapEpoch += 1;
+    this.disposeActiveBuild();
     this.disposeCurrentRenderers();
     this.records.clear();
     this.queue = [];
@@ -108,13 +138,20 @@ export class ChunkStreamingManager {
     this.viewRevision = 0;
     this.initialReady = false;
     this.hasMapData = true;
+    this.visualAssetRegistry.ensureReady();
     this.initialReadyPromise = new Promise<void>((resolve) => {
       this.resolveInitialReady = resolve;
     });
     this.terrainRenderer = new TerrainChunkRenderer(this.scene, data, []);
     this.waterRenderer = new WaterChunkRenderer(this.scene, data, seaLevelSample, []);
-    this.forestRenderer = new ForestChunkRenderer(this.scene, data, []);
-    this.depositRenderer = new DepositChunkRenderer(this.scene, data, []);
+    this.environmentRenderer = new EnvironmentChunkRenderer(
+      this.scene,
+      data,
+      this.visualAssetRegistry,
+      [],
+      this.quality,
+    );
+    this.depositRenderer = new DepositChunkRenderer(this.scene, data, this.visualAssetRegistry, []);
   }
 
   beginInitialView(
@@ -126,6 +163,7 @@ export class ChunkStreamingManager {
     }
 
     const selection = selectChunksForView(camera, undefined, undefined, undefined, navigationState);
+    this.environmentRenderer?.setView(camera, navigationState?.navigationPlaneY ?? CAMERA_NAVIGATION_PLANE_Y);
     this.initialVisibleKeys = new Set(selection.visible.map(chunkKey));
     this.applySelection(selection);
     this.lastCameraViewSignature = createCameraViewSignature(camera, navigationState);
@@ -139,6 +177,7 @@ export class ChunkStreamingManager {
     }
 
     const cameraViewSignature = createCameraViewSignature(camera, navigationState);
+    this.environmentRenderer?.setView(camera, navigationState?.navigationPlaneY ?? CAMERA_NAVIGATION_PLANE_Y);
     if (cameraViewSignature !== this.lastCameraViewSignature) {
       const selection = selectChunksForView(camera, undefined, undefined, undefined, navigationState);
       const nextSignature = createChunkSelectionSignature(selection);
@@ -150,9 +189,20 @@ export class ChunkStreamingManager {
     }
 
     const frameStart = performance.now();
-    while (this.queue.length > 0 && performance.now() - frameStart < STREAMING_BUILD_BUDGET_MS) {
-      this.buildNextBundle();
+    const buildBudgetMs = getActiveBuildBudgetMs();
+    while (
+      (this.queue.length > 0 || this.activeBuild || this.environmentRenderer?.hasPendingLodRefresh()) &&
+      performance.now() - frameStart < buildBudgetMs
+    ) {
+      if (this.activeBuild) {
+        this.buildNextBundleStage();
+      } else if (this.environmentRenderer?.processNextLodRefresh()) {
+        continue;
+      } else {
+        this.buildNextBundleStage();
+      }
     }
+    this.waterRenderer?.update(performance.now() / 1_000);
     this.retireStaleRecordsIfSafe();
     this.resolveInitialReadiness();
   }
@@ -191,13 +241,15 @@ export class ChunkStreamingManager {
       rollingBundleBuildMs: this.rollingBundleBuildMs,
       peakVisibleCount: this.peakVisibleCount,
       initialReady: this.initialReady,
-      buildBudgetMs: STREAMING_BUILD_BUDGET_MS,
+      buildBudgetMs: getActiveBuildBudgetMs(),
       initialDesiredBudget: INITIAL_DESIRED_CHUNK_BUDGET,
       selectionRevision: this.viewRevision,
+      environmentInstanceCount: this.environmentRenderer?.getAttachedInstanceCount() ?? 0,
     };
   }
 
   destroy(): void {
+    this.disposeActiveBuild();
     this.disposeCurrentRenderers();
     this.records.clear();
     this.queue = [];
@@ -205,6 +257,9 @@ export class ChunkStreamingManager {
     this.initialVisibleKeys.clear();
     this.currentSelection = null;
     this.hasMapData = false;
+    if (this.ownsVisualAssetRegistry) {
+      this.visualAssetRegistry.destroy();
+    }
     this.resolveInitialReady?.();
     this.resolveInitialReady = null;
   }
@@ -280,96 +335,132 @@ export class ChunkStreamingManager {
     this.enforceRetainedBudget();
   }
 
-  private buildNextBundle(): void {
-    const entry = this.queue.shift();
-    if (!entry) {
-      return;
-    }
-
-    const key = chunkKey(entry.coordinate);
-    const record = this.records.get(key);
-    if (!record) {
-      return;
-    }
-
-    record.state = 'building';
-    this.inFlightCount = 1;
-    const startedAt = performance.now();
-    let bundle: ChunkBundle | null = null;
-
-    try {
-      bundle = this.createBundle(entry.coordinate);
-      record.state = 'ready';
-      const stillUseful = entry.epoch === this.mapEpoch &&
-        record.epoch === this.mapEpoch &&
-        this.desiredKeys.has(key);
-      if (!stillUseful) {
-        this.disposeBundle(bundle);
-        record.state = 'disposed';
-        this.records.delete(key);
+  private buildNextBundleStage(): void {
+    if (!this.activeBuild) {
+      const entry = this.queue.shift();
+      if (!entry) {
         return;
       }
-
-      this.attachBundle(bundle);
-      record.bundle = bundle;
-      record.state = 'attached';
-    } catch (error) {
-      if (bundle) {
-        this.disposeBundle(bundle);
+      const record = this.records.get(chunkKey(entry.coordinate));
+      if (!record) {
+        return;
       }
-      record.state = 'disposed';
-      this.records.delete(key);
-      console.error('[chunk streaming] bundle build failed', {
-        error,
-        chunk: entry.coordinate,
-        epoch: entry.epoch,
-        viewRevision: entry.viewRevision,
-      });
-    } finally {
-      const duration = performance.now() - startedAt;
-      this.lastBundleBuildMs = duration;
-      this.rollingBundleBuildMs = this.rollingBundleBuildMs === null
-        ? duration
-        : this.rollingBundleBuildMs * 0.8 + duration * 0.2;
-      this.inFlightCount = 0;
+      record.state = 'building';
+      this.activeBuild = {
+        entry,
+        record,
+        startedAt: performance.now(),
+        stage: 0,
+      };
+      this.inFlightCount = 1;
+    }
+
+    const build = this.activeBuild;
+    if (!build || !this.terrainRenderer || !this.waterRenderer || !this.environmentRenderer || !this.depositRenderer) {
+      return;
+    }
+
+    try {
+      const { x, y } = build.entry.coordinate;
+      switch (build.stage) {
+        case 0:
+          build.terrain = this.terrainRenderer.createChunk(x, y);
+          build.stage = 1;
+          break;
+        case 1:
+          build.water = this.waterRenderer.createChunk(x, y);
+          build.stage = 2;
+          break;
+        case 2:
+          build.environment = this.environmentRenderer.createChunk(x, y);
+          build.stage = 3;
+          break;
+        case 3:
+          build.deposits = this.depositRenderer.createChunk(x, y);
+          this.finishBundleBuild(build);
+          break;
+      }
+    } catch (error) {
+      this.failBundleBuild(build, error);
     }
   }
 
-  private createBundle(coordinate: LogicalChunkCoordinate): ChunkBundle {
-    if (!this.terrainRenderer || !this.waterRenderer || !this.forestRenderer || !this.depositRenderer) {
-      throw new Error('Chunk renderers are not initialized.');
+  private finishBundleBuild(build: ChunkBuildState): void {
+    const key = chunkKey(build.entry.coordinate);
+    const bundle: ChunkBundle = {
+      coordinate: build.entry.coordinate,
+      terrain: build.terrain!,
+      water: build.water ?? null,
+      environment: build.environment ?? null,
+      deposits: build.deposits!,
+    };
+    const stillUseful = build.entry.epoch === this.mapEpoch &&
+      build.record.epoch === this.mapEpoch &&
+      this.desiredKeys.has(key);
+    if (!stillUseful) {
+      this.disposeBundle(bundle);
+      build.record.state = 'disposed';
+      this.records.delete(key);
+    } else {
+      this.attachBundle(bundle);
+      build.record.bundle = bundle;
+      build.record.state = 'attached';
     }
+    this.completeBuildTiming(build);
+  }
 
-    let terrain: THREE.Mesh | null = null;
-    let water: THREE.Mesh | null = null;
-    let forest: THREE.InstancedMesh | null = null;
-    let deposits: DepositChunkObjects | null = null;
+  private failBundleBuild(build: ChunkBuildState, error: unknown): void {
+    this.disposePartialBuild(build);
+    const key = chunkKey(build.entry.coordinate);
+    build.record.state = 'disposed';
+    this.records.delete(key);
+    this.completeBuildTiming(build);
+    console.error('[chunk streaming] bundle build failed', {
+      error,
+      chunk: build.entry.coordinate,
+      epoch: build.entry.epoch,
+      viewRevision: build.entry.viewRevision,
+    });
+  }
 
-    try {
-      terrain = this.terrainRenderer.createChunk(coordinate.x, coordinate.y);
-      water = this.waterRenderer.createChunk(coordinate.x, coordinate.y);
-      forest = this.forestRenderer.createChunk(coordinate.x, coordinate.y);
-      deposits = this.depositRenderer.createChunk(coordinate.x, coordinate.y);
-      return { coordinate, terrain, water, forest, deposits };
-    } catch (error) {
-      if (terrain) {
-        this.terrainRenderer.disposeChunk(terrain);
-      }
-      if (water) {
-        this.waterRenderer.disposeChunk(water);
-      }
-      if (forest) {
-        this.forestRenderer.disposeChunk(forest);
-      }
-      if (deposits) {
-        this.depositRenderer.disposeChunk(deposits);
-      }
-      throw error;
+  private completeBuildTiming(build: ChunkBuildState): void {
+    const duration = performance.now() - build.startedAt;
+    this.lastBundleBuildMs = duration;
+    this.rollingBundleBuildMs = this.rollingBundleBuildMs === null
+      ? duration
+      : this.rollingBundleBuildMs * 0.8 + duration * 0.2;
+    this.activeBuild = null;
+    this.inFlightCount = 0;
+  }
+
+  private disposeActiveBuild(): void {
+    if (!this.activeBuild) {
+      return;
+    }
+    this.disposePartialBuild(this.activeBuild);
+    this.activeBuild.record.state = 'disposed';
+    this.records.delete(chunkKey(this.activeBuild.entry.coordinate));
+    this.activeBuild = null;
+    this.inFlightCount = 0;
+  }
+
+  private disposePartialBuild(build: ChunkBuildState): void {
+    if (build.terrain) {
+      this.terrainRenderer?.disposeChunk(build.terrain);
+    }
+    if (build.water) {
+      this.waterRenderer?.disposeChunk(build.water);
+    }
+    if (build.environment) {
+      this.environmentRenderer?.disposeChunk(build.environment);
+    }
+    if (build.deposits) {
+      this.depositRenderer?.disposeChunk(build.deposits);
     }
   }
 
   private attachBundle(bundle: ChunkBundle): void {
-    if (!this.terrainRenderer || !this.waterRenderer || !this.forestRenderer || !this.depositRenderer) {
+    if (!this.terrainRenderer || !this.waterRenderer || !this.environmentRenderer || !this.depositRenderer) {
       throw new Error('Chunk renderers are not initialized.');
     }
 
@@ -378,8 +469,8 @@ export class ChunkStreamingManager {
     if (bundle.water) {
       this.waterRenderer.attachChunk(coordinate.x, coordinate.y, bundle.water);
     }
-    if (bundle.forest) {
-      this.forestRenderer.attachChunk(coordinate.x, coordinate.y, bundle.forest);
+    if (bundle.environment) {
+      this.environmentRenderer.attachChunk(coordinate.x, coordinate.y, bundle.environment);
     }
     this.depositRenderer.attachChunk(coordinate.x, coordinate.y, bundle.deposits);
   }
@@ -389,8 +480,8 @@ export class ChunkStreamingManager {
     if (bundle.water) {
       this.waterRenderer?.disposeChunk(bundle.water);
     }
-    if (bundle.forest) {
-      this.forestRenderer?.disposeChunk(bundle.forest);
+    if (bundle.environment) {
+      this.environmentRenderer?.disposeChunk(bundle.environment);
     }
     this.depositRenderer?.disposeChunk(bundle.deposits);
   }
@@ -400,7 +491,7 @@ export class ChunkStreamingManager {
     const { x, y } = record.coordinate;
     this.terrainRenderer?.removeChunk(x, y);
     this.waterRenderer?.removeChunk(x, y);
-    this.forestRenderer?.removeChunk(x, y);
+    this.environmentRenderer?.removeChunk(x, y);
     this.depositRenderer?.removeChunk(x, y);
     record.state = 'disposed';
     this.records.delete(chunkKey(record.coordinate));
@@ -455,11 +546,11 @@ export class ChunkStreamingManager {
   private disposeCurrentRenderers(): void {
     this.terrainRenderer?.destroy();
     this.waterRenderer?.destroy();
-    this.forestRenderer?.destroy();
+    this.environmentRenderer?.destroy();
     this.depositRenderer?.destroy();
     this.terrainRenderer = null;
     this.waterRenderer = null;
-    this.forestRenderer = null;
+    this.environmentRenderer = null;
     this.depositRenderer = null;
   }
 }
@@ -474,4 +565,13 @@ function createCameraViewSignature(
     ...camera.projectionMatrix.elements,
     navigationState?.navigationPlaneY ?? 0,
   ].map((value) => Math.round(value * 1_000)).join(',');
+}
+
+function getActiveBuildBudgetMs(): number {
+  return isChunkDebugEnabled() ? CHUNK_DEBUG_BUILD_BUDGET_MS : STREAMING_BUILD_BUDGET_MS;
+}
+
+function isChunkDebugEnabled(): boolean {
+  return typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('debug') === 'chunks';
 }

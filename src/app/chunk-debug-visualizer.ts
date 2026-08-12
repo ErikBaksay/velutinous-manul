@@ -15,6 +15,7 @@ import {
   MAX_CHUNK_CONTENT_HEIGHT,
 } from './chunk-visibility';
 import { ChunkStreamingDiagnostics } from './chunk-streaming-manager';
+import { RenderDiagnostics } from './render-diagnostics';
 import { TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
 
 export class ChunkDebugVisualizer {
@@ -75,6 +76,7 @@ export class ChunkDebugVisualizer {
     selection: ChunkViewSelection,
     diagnostics: ChunkStreamingDiagnostics,
     camera: CameraDebugState,
+    render: RenderDiagnostics,
   ): void {
     const signature = createChunkSelectionSignature(selection);
     if (!this.metricsOnly && signature !== this.lastSignature) {
@@ -120,6 +122,7 @@ export class ChunkDebugVisualizer {
       `candidates: ${selection.candidateCount}`,
       `culled:     ${frustumCulledCount} (candidate bounds)`,
       `peak view:  ${diagnostics.peakVisibleCount}`,
+      `environment: ${diagnostics.environmentInstanceCount} instances`,
       `last build: ${formatMilliseconds(diagnostics.lastBundleBuildMs)}`,
       `rolling:    ${formatMilliseconds(diagnostics.rollingBundleBuildMs)}`,
       `budget:     ${budgetMessage} / ${diagnostics.buildBudgetMs} ms target`,
@@ -129,6 +132,14 @@ export class ChunkDebugVisualizer {
       `map epoch:  ${diagnostics.mapEpoch}`,
       `selection:  ${diagnostics.selectionRevision}`,
       `initial:    ${diagnostics.initialReady ? 'ready' : 'streaming'}`,
+      `quality:    ${render.quality}`,
+      `fps:        ${render.fps.toFixed(1)} (${render.frameTimeMs.toFixed(2)} ms)`,
+      `render CPU: ${render.renderCpuMs.toFixed(2)} ms`,
+      `scene CPU:  ${render.sceneRenderCpuMs.toFixed(2)} ms`,
+      `shadow CPU: ${render.shadowPassCpuMs.toFixed(2)} ms`,
+      `GTAO CPU:   ${render.gtaoPassCpuMs.toFixed(2)} ms`,
+      `draw calls: ${render.drawCalls}`,
+      `triangles:  ${render.triangles}`,
       `camera:     ${formatVector(camera.position)}`,
       `target:     ${formatVector(camera.target)}`,
       `pivot y:    ${camera.navigationPlaneY.toFixed(2)}`,
@@ -156,6 +167,16 @@ export class ChunkDebugVisualizer {
     this.metricsElement.dataset['candidates'] = String(selection.candidateCount);
     this.metricsElement.dataset['frustumCulled'] = String(frustumCulledCount);
     this.metricsElement.dataset['initial'] = diagnostics.initialReady ? 'ready' : 'streaming';
+    this.metricsElement.dataset['environmentInstances'] = String(diagnostics.environmentInstanceCount);
+    this.metricsElement.dataset['quality'] = render.quality;
+    this.metricsElement.dataset['fps'] = String(render.fps);
+    this.metricsElement.dataset['frameTime'] = String(render.frameTimeMs);
+    this.metricsElement.dataset['renderCpu'] = String(render.renderCpuMs);
+    this.metricsElement.dataset['sceneRenderCpu'] = String(render.sceneRenderCpuMs);
+    this.metricsElement.dataset['shadowCpu'] = String(render.shadowPassCpuMs);
+    this.metricsElement.dataset['gtaoCpu'] = String(render.gtaoPassCpuMs);
+    this.metricsElement.dataset['drawCalls'] = String(render.drawCalls);
+    this.metricsElement.dataset['triangles'] = String(render.triangles);
     this.metricsElement.dataset['selectionRevision'] = String(diagnostics.selectionRevision);
     this.metricsElement.dataset['visibleChunks'] = selection.visible.map(chunkKey).join(',');
     this.metricsElement.dataset['prefetchChunks'] = selection.prefetch.map(chunkKey).join(',');

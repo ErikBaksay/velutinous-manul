@@ -1,10 +1,16 @@
 import * as THREE from 'three';
 import {
+  BIOME_KIND_CODES,
   HEIGHT_SAMPLE_COUNT,
   HEIGHT_SAMPLE_WIDTH,
+  MAP_CELL_COUNT,
   RESOURCE_KINDS,
 } from './map/map-types';
-import { calculateTerrainNormal, createChunkGeometry } from './terrain-chunk-renderer';
+import {
+  calculateTerrainColor,
+  calculateTerrainNormal,
+  createChunkGeometry,
+} from './terrain-chunk-renderer';
 
 describe('terrain chunks', () => {
   it('derives identical normals on both sides of a chunk boundary', () => {
@@ -36,6 +42,40 @@ describe('terrain chunks', () => {
     expect(new THREE.Vector3(normal.x, normal.y, normal.z).length()).toBeCloseTo(1, 5);
     leftGeometry.dispose();
     rightGeometry.dispose();
+  });
+
+  it('varies terrain color from biome climate values and deterministic regions', () => {
+    const data = createHeightOnlyData();
+    data.moisture = new Uint8Array(MAP_CELL_COUNT).fill(240);
+    data.temperature = new Uint8Array(MAP_CELL_COUNT).fill(220);
+
+    const lushColor = calculateTerrainColor(
+      data,
+      32,
+      32,
+      8,
+      0.92,
+      BIOME_KIND_CODES.forest,
+    );
+    const dryColor = calculateTerrainColor(
+      { ...data, moisture: new Uint8Array(MAP_CELL_COUNT).fill(40) },
+      32,
+      32,
+      8,
+      0.92,
+      BIOME_KIND_CODES.forest,
+    );
+    const neighboringRegionColor = calculateTerrainColor(
+      data,
+      42,
+      32,
+      8,
+      0.92,
+      BIOME_KIND_CODES.forest,
+    );
+
+    expect(lushColor.getHex()).not.toBe(dryColor.getHex());
+    expect(lushColor.getHex()).not.toBe(neighboringRegionColor.getHex());
   });
 });
 

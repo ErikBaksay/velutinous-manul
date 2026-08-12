@@ -8,6 +8,7 @@ import {
   WATER_KIND_CODES,
 } from './map/map-types';
 import { countActiveDeposits, DepositChunkRenderer } from './deposit-chunk-renderer';
+import { VisualAssetRegistry } from './visual-asset-registry';
 
 describe('deposit outcrops', () => {
   it('renders only deposits inside the active chunk window', () => {
@@ -30,6 +31,19 @@ describe('deposit outcrops', () => {
 
     renderer.destroy();
     expect(scene.getObjectByName('deposit-outcrops')).toBeUndefined();
+  });
+
+  it('keeps an injected visual asset registry alive after renderer destruction', () => {
+    const data = createDepositData([]);
+    const scene = new THREE.Scene();
+    const assets = new VisualAssetRegistry();
+    assets.ensureReady();
+    const renderer = new DepositChunkRenderer(scene, data, assets, []);
+
+    renderer.destroy();
+
+    expect(assets.has('ore_iron_lod0')).toBeTrue();
+    assets.destroy();
   });
 });
 

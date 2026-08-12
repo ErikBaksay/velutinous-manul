@@ -7,7 +7,11 @@ import {
   AuthoritativeMapData,
   WATER_KIND_CODES,
 } from './map/map-types';
-import { countForestCandidates, ForestChunkRenderer } from './forest-chunk-renderer';
+import {
+  countForestCandidates,
+  countForestTypes,
+  ForestChunkRenderer,
+} from './forest-chunk-renderer';
 
 describe('forest chunks', () => {
   it('places deterministic instanced trees only in forest cells', () => {
@@ -19,7 +23,12 @@ describe('forest chunks', () => {
 
     expect(firstCount).toBeGreaterThan(0);
     expect(secondCount).toBe(firstCount);
+    const forestTypes = countForestTypes(data, 16, 16);
+    expect(forestTypes.conifer).toBeGreaterThan(0);
+    expect(forestTypes.broadleaf).toBeGreaterThan(0);
     expect(scene.getObjectByName('forest-chunks')?.children.length).toBeGreaterThan(0);
+    expect(scene.getObjectByName('forest-chunks')?.children.some((child) => child.name.endsWith('-conifer'))).toBeTrue();
+    expect(scene.getObjectByName('forest-chunks')?.children.some((child) => child.name.endsWith('-broadleaf'))).toBeTrue();
 
     renderer.destroy();
     expect(scene.getObjectByName('forest-chunks')).toBeUndefined();
