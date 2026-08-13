@@ -5,11 +5,11 @@ describe('visual asset registry', () => {
     const registry = new VisualAssetRegistry();
     registry.ensureReady();
 
-    expect(registry.has('tree_spruce_lod0')).toBeTrue();
-    expect(registry.has('tree_oak_lod0')).toBeTrue();
-    expect(registry.has('reed_cluster_lod0')).toBeTrue();
-    expect(registry.has('shore_stones_lod0')).toBeTrue();
-    expect(registry.has('ore_iron_lod0')).toBeTrue();
+    expect(registry.has('tree_spruce_lod0')).toBe(true);
+    expect(registry.has('tree_oak_lod0')).toBe(true);
+    expect(registry.has('reed_cluster_lod0')).toBe(true);
+    expect(registry.has('shore_stones_lod0')).toBe(true);
+    expect(registry.has('ore_iron_lod0')).toBe(true);
     expect(registry.listFamily('canopy').length).toBeGreaterThanOrEqual(4);
     expect(registry.getLodAsset('tree_spruce_lod0', 1).lod).toBe(1);
 

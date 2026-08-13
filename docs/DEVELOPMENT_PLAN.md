@@ -199,7 +199,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added a standalone `GameScene` with an orthographic elevated camera, sunset lighting, fog, ground, water, bridge, road corridors, civic placeholder buildings, industrial warehouses, solar roofs, a utility plant, and lightweight trees.
 - Kept the scene static and procedural; grid, input, construction, production, transport, and simulation remain deferred.
 - `npm run build` passes with an initial bundle-size warning caused by the first Three.js inclusion.
-- `npm test -- --watch=false --browsers=ChromeHeadless` builds the test bundle but cannot launch because Chrome is not installed in the environment.
+- The browser unit-test command builds the test bundle but cannot launch because Chromium is not installed in the environment.
 - Local preview is running for manual review; no files were staged or committed.
 
 ### 2026-08-09 — Proxy scene removed
@@ -229,7 +229,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added transfer-buffer collection for every authoritative typed array and wired a browser smoke request from the application shell.
 - Added unit specifications for request replacement, stale-result protection, active errors, progress/completion forwarding, and transferable-buffer coverage.
 - `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, and `npx tsc -p tsconfig.spec.json --noEmit` pass.
-- The Angular test bundle builds, but Karma cannot execute because Chrome is not installed in the environment.
+- The Angular browser test bundle builds, but browser execution cannot start because Chromium is not installed in the environment.
 - No files were staged or committed.
 
 ### 2026-08-09 — Map Generation v1 Gate 3.1
@@ -385,7 +385,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added one logical prefetch ring, the initial desired-chunk tuning value of 576, visible/prefetch/desired/rejected classification, and budget-pressure reporting without attaching or evicting chunks yet.
 - Added opt-in development diagnostics at `?debug=chunks`, including chunk-bound visualization, visible/peak counts, candidate counts, static attached count, budget state, and map epoch.
 - Kept the current central static renderers, deterministic generation, World Forge overlay, and renderer ownership unchanged.
-- `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, `npx tsc -p tsconfig.spec.json --noEmit`, and `git diff --check` pass. Karma builds the test bundle but remains unable to bind port 9876 in this environment.
+- `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, `npx tsc -p tsconfig.spec.json --noEmit`, and `git diff --check` pass. The browser unit-test bundle builds but remains unable to bind its test server port in this environment.
 - No files were staged, committed, or pushed by the assistant.
 
 ### 2026-08-10 — Streaming Gate 3.1: atomic chunk bundles
@@ -397,7 +397,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Prioritized visible chunks ahead of prefetch, kept optional empty layers complete, and made the World Forge completion card wait for the default reset view’s visible chunks.
 - Kept map generation deterministic and retained the existing overlay; the previously observed camera/world cutoff remains intentionally deferred.
 - Added streaming lifecycle specifications for initial readiness and map-epoch replacement.
-- `npm run build`, both TypeScript checks, and `git diff --check` pass. Karma builds the complete test bundle but remains unable to bind port 9876 in this environment.
+- `npm run build`, both TypeScript checks, and `git diff --check` pass. The browser unit-test runner builds the complete test bundle but remains unable to bind its test server port in this environment.
 - Manual browser review approved the streaming behavior. The preexisting shallow-angle chunk disappearance remains intentionally deferred for a later camera/frustum investigation.
 - No files were staged, committed, or pushed by the assistant.
 
@@ -409,7 +409,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Exposed survey peak visible, desired, and candidate counts in the `?debug=chunks` diagnostics without changing camera limits or enforcing a new cap.
 - Added a regression specification that confirms visible chunk priority is target-centered.
 - The shallow-angle chunk disappearance remains intentionally deferred.
-- `npm run build`, both TypeScript checks, and `git diff --check` pass. Karma remains environment-blocked at port 9876.
+- `npm run build`, both TypeScript checks, and `git diff --check` pass. Browser unit-test execution remains environment-blocked by the test server port.
 - No files were staged, committed, or pushed by the assistant.
 
 ### 2026-08-10 — Playwright chunk-visibility investigation
@@ -429,7 +429,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added transition-safe chunk streaming: current visible chunks are prioritized ahead of prefetch work, outgoing attached bundles are retained until the replacement visible set is ready, and retained bundles are bounded by the existing 576-chunk budget.
 - Added exact attached-key, retained-count, and missing-visible diagnostics to the development debug surface.
 - Added a full-map reference-frustum regression across 12°, 20°, 30°, 45°, and 65° elevations, streaming lifecycle coverage, and Playwright shallow-transition coverage at default and zoomed-out views.
-- Validation: `npm run build`, both TypeScript checks, focused visibility/streaming Karma specs (6 and 3 passed), and `npm run e2e` (13 passed). The full 48-spec Karma run compiled but Chrome disconnected after 8 specs in this environment.
+- Validation: `npm run build`, both TypeScript checks, focused visibility/streaming browser unit specs (6 and 3 passed), and `npm run e2e` (13 passed). The full 48-spec browser unit run compiled but Chromium disconnected after 8 specs in this environment.
 - Camera framing is intentionally bounded by a 40° minimum elevation, an 88° maximum elevation, and a map-safe minimum zoom derived from the terrain footprint. Map generation, chunk geometry, and rendering-layer behavior were not changed.
 
 ### 2026-08-10 — Shallow-angle view distance correction
@@ -444,7 +444,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Reproduced the zoomed-in shallow-tilt issue: the fixed `Y = 18` navigation plane was below the generated terrain range (`≈25.8–60`) and below the default sea surface (`≈35.2`).
 - Made the camera navigation/orbit plane follow the generated sea-level surface, including camera movement, reset framing, chunk target sorting, and diagnostics.
 - Added camera-controller coverage and Playwright coverage for zooming in first, then tilting to the configured 40° minimum; the pivot now remains on the map surface and visible chunks stay attached.
-- Validation: focused camera Karma specs (4 passed), `npm run build`, both TypeScript checks, and full `npm run e2e` (13 passed).
+- Validation: focused camera browser unit specs (4 passed), `npm run build`, both TypeScript checks, and full `npm run e2e` (13 passed).
 
 ### 2026-08-10 — Camera contract and verification cleanup
 
