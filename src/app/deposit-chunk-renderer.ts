@@ -12,34 +12,45 @@ import {
   createActiveChunkCoordinates,
   TERRAIN_CHUNK_SIZE,
 } from './terrain-chunk-renderer';
+import { VisualAssetRegistry } from './visual-asset-registry';
 
 const CHUNKS_PER_SIDE = MAP_WIDTH / TERRAIN_CHUNK_SIZE;
 const ROCKS_PER_DEPOSIT = 3;
 const MARKER_RING_SCALE = 0.76;
 const MARKER_CLEARANCE = 0.16;
 const OUTCROP_COLORS: Readonly<Record<DepositSource['kind'], number>> = Object.freeze({
-  'iron-ore': 0x9a5840,
-  'copper-ore': 0x65b29c,
-  stone: 0xb9b0a4,
+  'iron-ore': 0xa9654b,
+  'copper-ore': 0x58a995,
+  stone: 0xbab9a7,
 });
 
 export class DepositChunkRenderer {
   private readonly group = new THREE.Group();
-  private readonly rockGeometry = new THREE.DodecahedronGeometry(1, 0);
-  private readonly rockMaterials = new Map<DepositSource['kind'], THREE.MeshStandardMaterial>();
   private readonly ringGeometry = new THREE.RingGeometry(0.72, 0.84, 20);
   private readonly ringMaterials = new Map<DepositSource['kind'], THREE.MeshBasicMaterial>();
   private readonly chunks = new Map<string, DepositChunkObjects>();
   private readonly data: AuthoritativeMapData;
+  private readonly assets: VisualAssetRegistry;
+  private readonly ownsAssets: boolean;
 
   constructor(
     scene: THREE.Scene,
     data: AuthoritativeMapData,
+    assetsOrInitialChunks?: VisualAssetRegistry | readonly ChunkCoordinate[],
     initialChunks: readonly ChunkCoordinate[] = createActiveChunkCoordinates(),
   ) {
+    const legacyInitialChunks = Array.isArray(assetsOrInitialChunks)
+      ? assetsOrInitialChunks
+      : undefined;
+    const providedAssets = legacyInitialChunks === undefined && assetsOrInitialChunks !== undefined
+      ? assetsOrInitialChunks as VisualAssetRegistry
+      : undefined;
     this.group.name = 'deposit-outcrops';
     this.data = data;
-    for (const chunk of initialChunks) {
+    this.assets = providedAssets ?? new VisualAssetRegistry();
+    this.ownsAssets = providedAssets === undefined;
+    this.assets.ensureReady();
+    for (const chunk of legacyInitialChunks ?? initialChunks) {
       this.attachChunk(chunk.x, chunk.y, this.createChunk(chunk.x, chunk.y));
     }
     scene.add(this.group);
@@ -47,17 +58,15 @@ export class DepositChunkRenderer {
 
   destroy(): void {
     this.group.removeFromParent();
-    this.rockGeometry.dispose();
     this.ringGeometry.dispose();
-    for (const material of this.rockMaterials.values()) {
-      material.dispose();
-    }
     for (const material of this.ringMaterials.values()) {
       material.dispose();
     }
     this.chunks.clear();
-    this.rockMaterials.clear();
     this.ringMaterials.clear();
+    if (this.ownsAssets) {
+      this.assets.destroy();
+    }
   }
 
   createChunk(chunkX: number, chunkY: number): DepositChunkObjects {
@@ -71,10 +80,10 @@ export class DepositChunkRenderer {
         continue;
       }
 
-      const rockMaterial = this.getRockMaterial(kind);
+      const asset = this.assets.get(`ore_${kind === 'iron-ore' ? 'iron' : kind === 'copper-ore' ? 'copper' : 'stone'}_lod0`);
       const rocks = new THREE.InstancedMesh(
-        this.rockGeometry,
-        rockMaterial,
+        asset.geometry,
+        asset.material,
         kindDeposits.length * ROCKS_PER_DEPOSIT,
       );
       rocks.name = `deposit-outcrops-${kind}`;
@@ -123,26 +132,13 @@ export class DepositChunkRenderer {
     return this.chunks.size;
   }
 
-  private getRockMaterial(kind: DepositSource['kind']): THREE.MeshStandardMaterial {
-    let material = this.rockMaterials.get(kind);
-    if (!material) {
-      material = new THREE.MeshStandardMaterial({
-        color: OUTCROP_COLORS[kind],
-        roughness: 0.92,
-        metalness: 0.02,
-      });
-      this.rockMaterials.set(kind, material);
-    }
-    return material;
-  }
-
   private getRingMaterial(kind: DepositSource['kind']): THREE.MeshBasicMaterial {
     let material = this.ringMaterials.get(kind);
     if (!material) {
       material = new THREE.MeshBasicMaterial({
         color: OUTCROP_COLORS[kind],
         transparent: true,
-        opacity: 0.6,
+        opacity: 0.54,
         depthWrite: false,
         side: THREE.DoubleSide,
       });

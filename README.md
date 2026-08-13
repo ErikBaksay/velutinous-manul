@@ -26,6 +26,16 @@ The camera intentionally stays between 40° and 88° elevation and uses a map-sa
 
 The world-settings dock can be hidden while exploring and reopened with the **World settings** button.
 
+## Rendering quality
+
+The default renderer uses the balanced performance preset: direct rendering, capped device pixel ratio, terrain-only shadows, bounded environment density, and distance-based environment LODs. Optional presets can be selected with the query string:
+
+- `?quality=low` disables shadows and uses the smallest environment budget.
+- `?quality=balanced` uses the default playable settings.
+- `?quality=high` enables reduced-sample GTAO and environment canopy shadows.
+
+Use `?debug=chunks&metrics=only` to inspect FPS, frame time, scene/shadow/GTAO CPU timings, draw calls, triangles, environment instance count, and chunk build timings. Chunk debug mode intentionally raises the streaming budget and disables shadows, so use the quality presets for clean FPS comparisons.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:

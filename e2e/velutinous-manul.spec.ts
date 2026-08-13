@@ -497,14 +497,18 @@ async function holdKey(page: Page, key: string, milliseconds: number): Promise<v
 }
 
 async function holdKeyUntilMoved(page: Page, key: string, before: DebugMetrics): Promise<DebugMetrics> {
-  await holdKey(page, key, 220);
-  let after = await readDebugMetrics(page);
-  if (cameraDistance(before.cameraTarget, after.cameraTarget) <= 1) {
-    await focusCanvasForNavigation(page);
-    await holdKey(page, key, 220);
-    after = await readDebugMetrics(page);
+  const playwrightKey = key.startsWith('Key') ? key.slice(3).toLowerCase() : key;
+  await page.getByLabel('Interactive map camera').focus();
+  await page.keyboard.down(playwrightKey);
+  try {
+    await expect.poll(
+      async () => cameraDistance(before.cameraTarget, (await readDebugMetrics(page)).cameraTarget),
+      { timeout: 4_000, intervals: [100, 200, 300] },
+    ).toBeGreaterThan(1);
+  } finally {
+    await page.keyboard.up(playwrightKey);
   }
-  return after;
+  return readDebugMetrics(page);
 }
 
 async function focusCanvasForNavigation(page: Page): Promise<void> {
