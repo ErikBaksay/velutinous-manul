@@ -36,6 +36,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:ci
 
+      - name: Run save persistence smoke test
+        run: npm run e2e -- e2e/save-persistence.spec.ts
+
       - name: Configure GitHub Pages
         id: pages
         uses: actions/configure-pages@v6

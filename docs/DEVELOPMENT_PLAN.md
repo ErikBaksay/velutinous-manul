@@ -9,11 +9,11 @@ Every implementation milestone is small enough to run and manually test. Work pa
 ## Current status
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
-- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestone 2 is implemented and awaiting manual review.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing implemented.
-- **Current task:** Manually review the Milestone 2 start, workshop, empty-save, and unsaved-world states.
-- **Next planned work:** After approval, implement the Milestone 3 persistence foundation before beginning mine placement.
-- **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, save/load implementation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
+- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestone 3 persistence is implemented and awaiting manual review. Milestone 2 manual review remains part of the same entry-flow review.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing implemented; Milestone 3 IndexedDB, autosave, named saves, and portable import/export implemented.
+- **Current task:** Manually review the Milestone 2 entry flow together with the Milestone 3 empty-world save, load, delete, export, and import flow.
+- **Next planned work:** After persistence approval, implement the Milestone 4 empty-world round-trip approval and then begin the construction data foundation.
+- **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
 
@@ -142,7 +142,6 @@ Add more recipes, industries, vehicle types, settlement progression, regional pl
 - Final UI layout and information density.
 - Asset creation pipeline and model format.
 - Whether Angular should own the game shell only or also selected UI state.
-- The exact save schema, binary file format, and versioning/migration strategy for the approved local persistence direction.
 - Final procedural world size and streaming strategy.
 - Full electricity model, vehicle battery model, and economic balance.
 
@@ -173,7 +172,15 @@ Add more recipes, industries, vehicle types, settlement progression, regional pl
   - Continue requires a remembered last-active save reference and must gracefully fall back to Load Save when no valid continuation exists.
   - Load Save becomes the home for save-slot selection, import, export, deletion, and recovery messaging.
   - The map workshop remains focused on world creation; save management does not need to crowd the workshop controls.
-- **Open follow-up questions:** Define save-slot naming, manual-save versus autosave behavior, deletion/recovery rules, and the final portable save-file format before implementing persistence.
+- **Resolved in Milestone 3:** Save-slot naming, manual-save versus autosave behavior, deletion/recovery rules, and the portable save-file format are recorded below.
+
+### 2026-08-13 — Milestone 3 save behavior and portable format
+
+- **Decision:** Use named manual saves plus one visible, protected `Autosave` slot. Create the first Autosave when a world is accepted, refresh it every five minutes while the world is active, and refresh it before explicit Leave World.
+- **Decision:** Add slot names and slot kind to schema version 2. Continue reading version-1 portable files by migrating them to named manual saves with a deterministic fallback name.
+- **Decision:** Use JSON envelopes with base64-encoded typed arrays for portable saves. Imported files receive fresh local IDs, become manual saves, and require a new name when a name collision occurs.
+- **Decision:** Store authoritative save payloads and lightweight slot metadata in separate IndexedDB object stores. Store only the last-active save ID in `localStorage`.
+- **Decision:** Autosave is visible and exportable but protected from rename and deletion. Manual deletion requires confirmation; manual name collisions require overwrite confirmation.
 
 ## Current implementation plan after map-preview approval
 
@@ -204,6 +211,8 @@ Each milestone below is intentionally small and receives its own automated check
 - Keep `localStorage` limited to lightweight preferences and the last-active-save reference.
 
 **Exit condition:** An empty world can be saved, loaded, deleted, exported, and imported through the intended UI flows.
+
+**Implementation status:** Complete pending manual review. Added schema-versioned save slots, transactional IndexedDB storage, last-active tracking, five-minute Autosave, named manual saves, portable JSON/base64 export/import, v1 migration, validation, and visible storage/validation feedback in the entry and world-session flows.
 
 ### Milestone 4 — Empty-world round-trip approval
 
@@ -579,3 +588,11 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Verification: application/spec/e2e TypeScript checks and `git diff --check` pass; the focused start-screen → workshop → accept → world → reload Playwright flow passes in 1 test.
 - `npm run test:ci` and `npm run build` still exit 134 during Angular's `Building...` phase in this local environment. One adapted legacy camera test exceeded the extended slow-machine browser budget while the existing chunk-streaming/input loop was still active.
 - Manual approval status: pending review of the four application states and the unsaved-session handoff. No files were staged, committed, or pushed by the assistant.
+
+### 2026-08-13 — Milestone 3 — IndexedDB and portable save persistence
+
+- Added schema-version 2 save envelopes with named manual slots, a protected `Autosave` slot, v1 portable-file migration, and strict map/gameplay validation.
+- Added separate IndexedDB metadata and payload stores with transactional writes/deletes, last-active save tracking in `localStorage`, and JSON/base64 portable export/import.
+- Added Load Save slot management, Continue restoration, manual Save World, five-minute Autosave, explicit-leave persistence, import name conflict handling, and visible storage/validation errors.
+- Verification: application TypeScript, spec TypeScript, e2e TypeScript, and `git diff --check` pass. Focused Angular unit execution remains blocked by the known local Angular builder exit 134 during `Building...`; local browser smoke checks reached Load Save, empty state, and missing-Continue fallback with no console errors.
+- Manual approval status: pending review of Autosave creation, named save round-trip, Continue after reload, export/delete/import, and protected Autosave behavior. No files were staged, committed, or pushed by the assistant.

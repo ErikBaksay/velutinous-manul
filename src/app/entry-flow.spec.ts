@@ -54,6 +54,6 @@ describe('entry flow screens', () => {
 
     expect(text).toContain('No saved worlds');
     expect(text).toContain('This world session is no longer available');
-    expect(text).toContain('Local save storage and portable import/export will arrive in a later milestone');
+    expect(text).toContain('Choose a local world or import a portable backup');
   });
 });

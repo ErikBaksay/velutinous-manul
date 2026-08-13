@@ -1,6 +1,10 @@
 import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { getRuntimeQueryParams } from './runtime-query';
+import { LastActiveSaveStorageError } from './save/last-active-save';
+import { SaveStorageError } from './save/indexeddb-save-repository';
+import { SaveActionError, SavePersistenceService } from './save/save-persistence';
+import { WorldSessionRuntime } from './session-runtime';
 
 @Component({
   selector: 'app-start-screen',
@@ -18,7 +22,7 @@ import { getRuntimeQueryParams } from './runtime-query';
           <button type="button" (click)="continueGame()">
             <span>
               <strong>Continue</strong>
-              <small>No saved world is available yet</small>
+              <small>{{ isContinuing ? 'Opening the last active world…' : 'Resume the last active world' }}</small>
             </span>
             <span aria-hidden="true">→</span>
           </button>
@@ -38,7 +42,7 @@ import { getRuntimeQueryParams } from './runtime-query';
           </button>
         </div>
 
-        <p class="storage-note">Worlds are not saved until local persistence is added.</p>
+        <p class="storage-note">Worlds are saved locally in your browser. Export a backup from Load Save.</p>
       </section>
     </main>
   `,
@@ -169,11 +173,33 @@ import { getRuntimeQueryParams } from './runtime-query';
 })
 export class StartScreen {
   private readonly router = inject(Router);
+  private readonly persistence = inject(SavePersistenceService);
+  private readonly sessionRuntime = inject(WorldSessionRuntime);
+  isContinuing = false;
 
-  continueGame(): void {
-    void this.router.navigate(['/load-save'], {
-      queryParams: { ...getRuntimeQueryParams(), reason: 'missing-last-active' },
-    });
+  async continueGame(): Promise<void> {
+    if (this.isContinuing) {
+      return;
+    }
+    this.isContinuing = true;
+    try {
+      const save = await this.persistence.loadLastActiveSave();
+      if (save) {
+        this.sessionRuntime.setActiveWorld(save.world);
+        await this.router.navigate(['/world'], { queryParams: getRuntimeQueryParams() });
+        return;
+      }
+      await this.router.navigate(['/load-save'], {
+        queryParams: { ...getRuntimeQueryParams(), reason: 'missing-last-active' },
+      });
+    } catch (error: unknown) {
+      console.error('[save] continue failed', error);
+      await this.router.navigate(['/load-save'], {
+        queryParams: { ...getRuntimeQueryParams(), reason: getLoadSaveFailureReason(error) },
+      });
+    } finally {
+      this.isContinuing = false;
+    }
   }
 
   loadSave(): void {
@@ -183,4 +209,12 @@ export class StartScreen {
   newWorld(): void {
     void this.router.navigate(['/new-world'], { queryParams: getRuntimeQueryParams() });
   }
+}
+
+function getLoadSaveFailureReason(error: unknown): 'storage-unavailable' | 'save-unavailable' {
+  return error instanceof SaveStorageError ||
+    error instanceof LastActiveSaveStorageError ||
+    error instanceof SaveActionError && error.message.includes('storage')
+    ? 'storage-unavailable'
+    : 'save-unavailable';
 }

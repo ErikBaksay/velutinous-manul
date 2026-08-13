@@ -6,7 +6,12 @@ import {
 } from '../map/map-types';
 
 export const SAVE_GAME_FORMAT = 'velutinous-manul-save' as const;
-export const SAVE_GAME_SCHEMA_VERSION = 1 as const;
+export const LEGACY_SAVE_GAME_SCHEMA_VERSION = 1 as const;
+export const SAVE_GAME_SCHEMA_VERSION = 2 as const;
+export const AUTOSAVE_ID = 'autosave' as const;
+export const AUTOSAVE_NAME = 'Autosave' as const;
+
+export type SaveSlotKind = 'manual' | 'autosave';
 
 export type QuarterTurn = 0 | 1 | 2 | 3;
 
@@ -40,16 +45,27 @@ export interface WorldSession {
   readonly gameplay: GameplayState;
 }
 
+export interface LegacySaveGame {
+  readonly format: typeof SAVE_GAME_FORMAT;
+  readonly schemaVersion: typeof LEGACY_SAVE_GAME_SCHEMA_VERSION;
+  readonly saveId: string;
+  readonly world: WorldSession;
+}
+
 export interface SaveGame {
   readonly format: typeof SAVE_GAME_FORMAT;
   readonly schemaVersion: typeof SAVE_GAME_SCHEMA_VERSION;
   readonly saveId: string;
+  readonly slotName: string;
+  readonly slotKind: SaveSlotKind;
   readonly world: WorldSession;
 }
 
 export interface SaveSlotMetadata {
   readonly saveId: string;
   readonly schemaVersion: typeof SAVE_GAME_SCHEMA_VERSION;
+  readonly slotName: string;
+  readonly slotKind: SaveSlotKind;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly seed: string;
@@ -85,11 +101,18 @@ export function createWorldSession(
   };
 }
 
-export function createSaveGame(saveId: string, world: WorldSession): SaveGame {
+export function createSaveGame(
+  saveId: string,
+  world: WorldSession,
+  slotName: string,
+  slotKind: SaveSlotKind,
+): SaveGame {
   return {
     format: SAVE_GAME_FORMAT,
     schemaVersion: SAVE_GAME_SCHEMA_VERSION,
     saveId,
+    slotName,
+    slotKind,
     world,
   };
 }
@@ -100,6 +123,8 @@ export function createSaveSlotMetadata(saveGame: SaveGame): SaveSlotMetadata {
   return {
     saveId: saveGame.saveId,
     schemaVersion: saveGame.schemaVersion,
+    slotName: saveGame.slotName,
+    slotKind: saveGame.slotKind,
     createdAt: saveGame.world.createdAt,
     updatedAt: saveGame.world.updatedAt,
     seed: configuration.seed,
@@ -108,4 +133,31 @@ export function createSaveSlotMetadata(saveGame: SaveGame): SaveSlotMetadata {
     mapIdentity: generationSummary.mapIdentity,
     mapHash: generationSummary.mapHash,
   };
+}
+
+export function createUpdatedWorldSession(
+  world: WorldSession,
+  now = Date.now(),
+): WorldSession {
+  return {
+    ...world,
+    updatedAt: now,
+    map: {
+      ...world.map,
+      configuration: { ...world.map.configuration },
+      generationSummary: { ...world.map.generationSummary },
+      authoritativeData: world.map.authoritativeData,
+    },
+    gameplay: {
+      ...world.gameplay,
+      placedBuildings: world.gameplay.placedBuildings.map((building) => ({
+        ...building,
+        origin: { ...building.origin },
+      })),
+    },
+  };
+}
+
+export function createFallbackImportedSlotName(world: WorldSession): string {
+  return `Imported World — ${world.map.configuration.seed}`;
 }

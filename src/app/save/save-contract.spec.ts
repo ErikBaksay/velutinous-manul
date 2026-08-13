@@ -56,12 +56,14 @@ describe('save contract', () => {
       1_753_000_000_001,
     );
 
-    const saveGame = createSaveGame('save-002', world);
+    const saveGame = createSaveGame('save-002', world, 'Test World', 'manual');
 
     expect(saveGame).toEqual({
       format: SAVE_GAME_FORMAT,
       schemaVersion: SAVE_GAME_SCHEMA_VERSION,
       saveId: 'save-002',
+      slotName: 'Test World',
+      slotKind: 'manual',
       world,
     });
   });
@@ -76,11 +78,15 @@ describe('save contract', () => {
       },
       1_753_000_000_002,
     );
-    const metadata = createSaveSlotMetadata(createSaveGame('save-003', world));
+    const metadata = createSaveSlotMetadata(
+      createSaveGame('save-003', world, 'Test World', 'manual'),
+    );
 
     expect(metadata).toEqual({
       saveId: 'save-003',
       schemaVersion: SAVE_GAME_SCHEMA_VERSION,
+      slotName: 'Test World',
+      slotKind: 'manual',
       createdAt: 1_753_000_000_002,
       updatedAt: 1_753_000_000_002,
       seed: DEFAULT_MAP_CONFIG.seed,
@@ -109,6 +115,8 @@ describe('save contract', () => {
         },
         1_753_000_000_003,
       ),
+      'Test World',
+      'manual',
     );
     const cloned = structuredClone(saveGame);
 
