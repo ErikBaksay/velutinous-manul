@@ -42,7 +42,7 @@ describe('deposit outcrops', () => {
 
     renderer.destroy();
 
-    expect(assets.has('ore_iron_lod0')).toBeTrue();
+    expect(assets.has('ore_iron_lod0')).toBe(true);
     assets.destroy();
   });
 });

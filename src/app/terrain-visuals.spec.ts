@@ -21,7 +21,7 @@ describe('terrain visual habitats', () => {
     expect(first).toEqual(second);
     expect(profile.canopy).toContain('tree_spruce_lod0');
     expect(profile.understory.length).toBeGreaterThan(0);
-    expect(isPlacementCompatible(first, 'canopy')).toBeTrue();
+    expect(isPlacementCompatible(first, 'canopy')).toBe(true);
     expect(deterministicVisualValue(first.cellIndex, first.landmassId, 4))
       .toBe(deterministicVisualValue(first.cellIndex, first.landmassId, 4));
   });
@@ -33,7 +33,7 @@ describe('terrain visual habitats', () => {
     const sample = sampleTerrainVisual(data, 256, 256);
 
     expect(getTerrainVisualProfile(sample).canopy).toEqual([]);
-    expect(isPlacementCompatible(sample, 'canopy')).toBeFalse();
-    expect(isPlacementCompatible(sample, 'shore')).toBeFalse();
+    expect(isPlacementCompatible(sample, 'canopy')).toBe(false);
+    expect(isPlacementCompatible(sample, 'shore')).toBe(false);
   });
 });

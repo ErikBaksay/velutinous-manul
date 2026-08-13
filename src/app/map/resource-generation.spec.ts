@@ -29,7 +29,7 @@ describe('resource province and renewable field generation', () => {
     );
     expect(first.result.depositSources).toEqual(second.result.depositSources);
     expect(first.result.depositSources.length).toBeGreaterThan(0);
-    expect(first.result.depositSources.every((deposit) => deposit.resourceProvinceId > 0)).toBeTrue();
+    expect(first.result.depositSources.every((deposit) => deposit.resourceProvinceId > 0)).toBe(true);
 
     let landCellCount = 0;
     for (let cellIndex = 0; cellIndex < MAP_CELL_COUNT; cellIndex += 1) {
@@ -42,7 +42,7 @@ describe('resource province and renewable field generation', () => {
       }
     }
     expect(landCellCount).toBeGreaterThan(0);
-  });
+  }, 300_000);
 
   it('responds measurably to global resource abundance', () => {
     const scarceConfig = { ...DEFAULT_MAP_CONFIG, resourceAbundance: 0 };
@@ -75,7 +75,7 @@ describe('resource province and renewable field generation', () => {
         expect(data.resourceIntensity['fertile-land'][cellIndex]).toBe(0);
       }
     }
-  });
+  }, 300_000);
 });
 
 function generateResourceData(config: typeof DEFAULT_MAP_CONFIG) {

@@ -70,23 +70,27 @@ Before the first deployment, set the repository's Pages publishing source to **G
 
 ## Running unit tests
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+To execute the fast application and rendering unit tests with Angular's Vitest-based browser builder, use the following command:
 
 ```bash
 ng test
 ```
 
-The full test command includes the production-size map-generation tests. GitHub Pages uses a faster CI profile that keeps the application and rendering tests but excludes the six full-resolution map-generation suites, which can block a headless browser for longer than Karma's activity timeout:
+The browser unit-test command excludes the six full-resolution map-generation suites. GitHub Pages runs the same fast profile, and the workflow installs Chromium before running it:
 
 ```bash
 npm run test:ci
 ```
 
-The excluded map-generation tests remain available through the regular `ng test` command for local validation.
+The full-resolution map-generation tests are pure Node/Vitest tests and can be run separately when needed. They have a longer per-test timeout because production-size generation is intentionally expensive:
+
+```bash
+npm run test:map
+```
 
 ## Running end-to-end tests
 
-Install the bundled Chromium browser once, then run the Playwright browser suite:
+Install the bundled Chromium browser once, then run the Playwright browser suite. This is the primary local end-to-end validation for the application:
 
 ```bash
 npx playwright install chromium

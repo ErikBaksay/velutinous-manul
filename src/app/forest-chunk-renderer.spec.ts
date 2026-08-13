@@ -27,8 +27,8 @@ describe('forest chunks', () => {
     expect(forestTypes.conifer).toBeGreaterThan(0);
     expect(forestTypes.broadleaf).toBeGreaterThan(0);
     expect(scene.getObjectByName('forest-chunks')?.children.length).toBeGreaterThan(0);
-    expect(scene.getObjectByName('forest-chunks')?.children.some((child) => child.name.endsWith('-conifer'))).toBeTrue();
-    expect(scene.getObjectByName('forest-chunks')?.children.some((child) => child.name.endsWith('-broadleaf'))).toBeTrue();
+    expect(scene.getObjectByName('forest-chunks')?.children.some((child) => child.name.endsWith('-conifer'))).toBe(true);
+    expect(scene.getObjectByName('forest-chunks')?.children.some((child) => child.name.endsWith('-broadleaf'))).toBe(true);
 
     renderer.destroy();
     expect(scene.getObjectByName('forest-chunks')).toBeUndefined();

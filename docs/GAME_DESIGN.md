@@ -14,7 +14,8 @@ The implementation plan lives in [`DEVELOPMENT_PLAN.md`](./DEVELOPMENT_PLAN.md).
 - **Initial architecture:** Angular, TypeScript, Three.js, client-side simulation
 - **Deployment direction:** GitHub Pages
 - **Later capability:** PWA support
-- **Initial persistence:** Local save/state; no backend required at the start
+- **Initial persistence:** Browser-local IndexedDB saves with file export/import; no backend required at the start
+- **Initial entry flow:** A dedicated start screen with Continue, Load Save (including import/export), and New World
 - **Reference inspirations:** Factorio, Transport Fever, Captain of Industry
 
 ## One-sentence definition

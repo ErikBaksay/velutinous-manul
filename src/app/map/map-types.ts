@@ -25,7 +25,7 @@ export interface MapConfig {
 }
 
 export const DEFAULT_MAP_CONFIG: Readonly<MapConfig> = Object.freeze({
-  seed: 'VM-START-001',
+  seed: 'VELUTINOUS-MANUL-START-001',
   preset: 'balanced-continental',
   width: MAP_WIDTH,
   height: MAP_HEIGHT,

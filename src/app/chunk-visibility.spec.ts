@@ -31,8 +31,8 @@ describe('chunk visibility selection', () => {
     const selection = selectChunksForView(camera);
 
     expect(selection.visible.length).toBeGreaterThan(0);
-    expect(selection.visible.every((chunk) => chunk.x >= 0 && chunk.x < 32)).toBeTrue();
-    expect(selection.visible.every((chunk) => chunk.y >= 0 && chunk.y < 32)).toBeTrue();
+    expect(selection.visible.every((chunk) => chunk.x >= 0 && chunk.x < 32)).toBe(true);
+    expect(selection.visible.every((chunk) => chunk.y >= 0 && chunk.y < 32)).toBe(true);
   });
 
   it('produces stable signatures for unchanged selection sets', () => {

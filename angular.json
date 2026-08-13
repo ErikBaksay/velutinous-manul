@@ -72,36 +72,25 @@
           "builder": "@angular/build:extract-i18n"
         },
         "test": {
-          "builder": "@angular/build:karma",
+          "builder": "@angular/build:unit-test",
           "options": {
-            "polyfills": [
-              "zone.js",
-              "zone.js/testing"
-            ],
+            "buildTarget": "velutinous-manul:build:development",
+            "runner": "vitest",
             "tsConfig": "tsconfig.spec.json",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "public"
-              }
-            ],
-            "styles": [
-              "src/styles.css"
+            "browsers": ["chromiumHeadless"],
+            "exclude": [
+              "src/app/map/terrain-generation.spec.ts",
+              "src/app/map/water-generation.spec.ts",
+              "src/app/map/hydrology-generation.spec.ts",
+              "src/app/map/biome-generation.spec.ts",
+              "src/app/map/resource-generation.spec.ts",
+              "src/app/map/starting-basin-generation.spec.ts"
             ]
           },
           "configurations": {
             "ci": {
               "watch": false,
-              "progress": false,
-              "browsers": "ChromeHeadlessNoSandbox",
-              "exclude": [
-                "src/app/map/terrain-generation.spec.ts",
-                "src/app/map/water-generation.spec.ts",
-                "src/app/map/hydrology-generation.spec.ts",
-                "src/app/map/biome-generation.spec.ts",
-                "src/app/map/resource-generation.spec.ts",
-                "src/app/map/starting-basin-generation.spec.ts"
-              ]
+              "reporters": ["default"]
             }
           }
         }

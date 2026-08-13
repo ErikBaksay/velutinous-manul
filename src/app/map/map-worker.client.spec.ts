@@ -15,7 +15,7 @@ describe('MapWorkerClient', () => {
     expect(workers[0].requests[0].requestId).toBe(1);
 
     expect(client.generate(DEFAULT_MAP_CONFIG)).toBe(2);
-    expect(workers[0].terminated).toBeTrue();
+    expect(workers[0].terminated).toBe(true);
     expect(workers[1].requests[0].requestId).toBe(2);
   });
 
@@ -46,7 +46,7 @@ describe('MapWorkerClient', () => {
     });
 
     expect(progress).toEqual(['started']);
-    expect(completed).toBeTrue();
+    expect(completed).toBe(true);
   });
 
   it('ignores responses from a replaced request, even if an old handler fires', () => {

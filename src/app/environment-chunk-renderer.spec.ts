@@ -22,7 +22,7 @@ describe('environment chunk renderer', () => {
     expect(firstCount).toBeGreaterThan(0);
     expect(secondCount).toBe(firstCount);
     expect(chunk?.meshes.length).toBeGreaterThan(1);
-    expect(chunk?.meshes.every((mesh) => !mesh.castShadow && !mesh.receiveShadow)).toBeTrue();
+    expect(chunk?.meshes.every((mesh) => !mesh.castShadow && !mesh.receiveShadow)).toBe(true);
     expect(chunk?.instanceCount).toBeLessThanOrEqual(320);
 
     if (chunk) {
@@ -30,7 +30,7 @@ describe('environment chunk renderer', () => {
       renderer.removeChunk(16, 16);
     }
     renderer.destroy();
-    expect(assets.has('tree_spruce_lod0')).toBeTrue();
+    expect(assets.has('tree_spruce_lod0')).toBe(true);
     assets.destroy();
   });
 });

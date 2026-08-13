@@ -1,6 +1,6 @@
 import { expect, Page, test, TestInfo } from '@playwright/test';
 
-const DETERMINISTIC_SEED = 'VM-START-001';
+const DETERMINISTIC_SEED = 'VELUTINOUS-MANUL-START-001';
 const CAMERA_SPEED = 96;
 const MIN_ZOOM = 1.54;
 const MAX_ZOOM = 128 / 32;
