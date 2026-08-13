@@ -5,6 +5,7 @@ import {
   RESOURCE_KINDS,
 } from '../map/map-types';
 import {
+  createSaveGame,
   createWorldSession,
   SAVE_GAME_SCHEMA_VERSION,
 } from './save-contract';
@@ -45,6 +46,44 @@ describe('portable save codec', () => {
     expect(parsed.world.map.authoritativeData.heightSamples[0]).toBe(4321);
     expect(parsed.world.map.authoritativeData.resourceIntensity['iron-ore'][0]).toBe(27);
     expect(parsed.world.map.authoritativeData.moisture.length).toBe(4);
+  });
+
+  it('round-trips placed buildings without requiring a registered definition', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'placed-building-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_103,
+    );
+    const placedBuildings = [
+      {
+        id: 'future-structure-1',
+        definitionId: 'future-structure',
+        origin: { x: 1, y: 0 },
+        rotationQuarterTurns: 3 as const,
+      },
+      {
+        id: 'future-structure-2',
+        definitionId: 'another-future-structure',
+        origin: { x: 0, y: 1 },
+        rotationQuarterTurns: 1 as const,
+      },
+    ];
+    const content = serializeSaveGame(
+      createSaveGame(
+        'placed-building-save',
+        { ...world, gameplay: { placedBuildings } },
+        'Placed Buildings',
+        'manual',
+      ),
+    );
+
+    const parsed = parsePortableSaveFile(content);
+
+    expect(parsed.world.gameplay.placedBuildings).toEqual(placedBuildings);
   });
 
   it('migrates a version-one portable file to a named manual save', () => {

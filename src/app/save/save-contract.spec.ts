@@ -128,6 +128,42 @@ describe('save contract', () => {
     );
     expect(cloned.world.map.authoritativeData.resourceIntensity['copper-ore'][0]).toBe(23);
   });
+
+  it('preserves placed building state through structured cloning', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'session-005',
+        mapConfig: DEFAULT_MAP_CONFIG,
+        mapSummary: createMapSummary(DEFAULT_MAP_CONFIG.seed),
+        mapData: createMapData(),
+      },
+      1_753_000_000_004,
+    );
+    const placedBuildings = [
+      {
+        id: 'future-structure-1',
+        definitionId: 'future-structure',
+        origin: { x: 12, y: 18 },
+        rotationQuarterTurns: 1 as const,
+      },
+      {
+        id: 'future-structure-2',
+        definitionId: 'another-future-structure',
+        origin: { x: 30, y: 40 },
+        rotationQuarterTurns: 3 as const,
+      },
+    ];
+    const saveGame = createSaveGame(
+      'save-005',
+      { ...world, gameplay: { placedBuildings } },
+      'Placed Buildings',
+      'manual',
+    );
+
+    const cloned = structuredClone(saveGame);
+
+    expect(cloned.world.gameplay.placedBuildings).toEqual(placedBuildings);
+  });
 });
 
 function createMapData(): AuthoritativeMapData {

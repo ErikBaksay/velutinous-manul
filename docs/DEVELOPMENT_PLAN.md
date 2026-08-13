@@ -9,10 +9,10 @@ Every implementation milestone is small enough to run and manually test. Work pa
 ## Current status
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
-- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestone 3 persistence is implemented and awaiting manual review. Milestone 2 manual review remains part of the same entry-flow review.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing implemented; Milestone 3 IndexedDB, autosave, named saves, and portable import/export implemented.
-- **Current task:** Manually review the Milestone 2 entry flow together with the Milestone 3 empty-world save, load, delete, export, and import flow.
-- **Next planned work:** After persistence approval, implement the Milestone 4 empty-world round-trip approval and then begin the construction data foundation.
+- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestones 2–5 are implemented pending their focused review gates.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations.
+- **Current task:** Review the focused Milestone 5 construction data and save round-trip checks before adding visible selection and placeholder placement.
+- **Next planned work:** Milestone 6 selection and placeholder mine placement after construction foundation approval.
 - **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -229,6 +229,15 @@ Each milestone below is intentionally small and receives its own automated check
 - Keep the rules data-driven so the mine is not hard-coded into the renderer.
 
 **Exit condition:** A building can be represented and validated in world state without requiring a final 3D model.
+
+**Implementation status:** Complete pending focused review. Added pure grid-coordinate, rectangular-footprint, data-driven definition, derived occupancy, terrain sampling, and generic placement-validation modules under `src/app/construction/`. Existing schema-version-2 placed-building state remains unchanged, and structured-clone plus portable JSON/base64 round-trip coverage now includes multiple placed buildings and unknown future definition IDs.
+
+### Milestone 5 construction decisions — 2026-08-13
+
+- **Footprint convention:** Use an integer anchor rectangle. `origin` is the canonical rectangle's minimum-x/minimum-y cell. Quarter-turns rotate local cells around that anchor, normalize to non-negative offsets, and swap width and height for odd rotations.
+- **Terrain policy:** Use definition-driven placement profiles with independent `requiresBuildable`, `allowWater`, `allowImpassable`, and `maxSlope` fields. Ordinary land structures provide strict policies; future bridges may opt into water or impassable surfaces, while bridge connection and endpoint rules remain a later concern.
+- **Rejected footprint alternatives:** Center anchors were rejected because even-sized footprints require an additional half-cell or bias convention before the mine pivot is known. Explicit rotated cell masks were deferred because no current building requires irregular geometry.
+- **Rejected terrain alternatives:** A permanent strict baseline was rejected because bridges and other special structures need different surface permissions. A composable rule pipeline was deferred because it would add footprint-level semantics before a real second rule type exists.
 
 ### Milestone 6 — Selection and placeholder mine placement
 
