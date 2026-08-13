@@ -252,7 +252,7 @@ export class App implements AfterViewInit, OnDestroy {
       crypto.getRandomValues(values);
       this.mapConfig = {
         ...this.mapConfig,
-        seed: `VM-${values[0].toString(16).padStart(8, '0')}-${values[1].toString(16).padStart(8, '0')}`,
+        seed: `VELUTINOUS-MANUL-${values[0].toString(16).padStart(8, '0')}-${values[1].toString(16).padStart(8, '0')}`,
       };
       this.generationError = null;
       return;
@@ -260,7 +260,7 @@ export class App implements AfterViewInit, OnDestroy {
 
     this.mapConfig = {
       ...this.mapConfig,
-      seed: `VM-${Date.now().toString(36).toUpperCase()}`,
+      seed: `VELUTINOUS-MANUL-${Date.now().toString(36).toUpperCase()}`,
     };
     this.generationError = null;
   }

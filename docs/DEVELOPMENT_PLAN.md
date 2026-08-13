@@ -9,12 +9,13 @@ Every implementation milestone is small enough to run and manually test. Work pa
 ## Current status
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
-- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented.
-- **Current task:** Manual review of the transition-safe streaming fix and the intentional camera framing limits.
-- **Next planned work:** After approval, move from the map-preview foundation to the first construction interaction; revisit budget hysteresis only if manual review shows it is needed.
-- **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, saving, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
+- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved.
+- **Current task:** Prepare the dedicated start-screen and local-save foundation milestone.
+- **Next planned work:** Implement the approved Continue / Load Save / New World entry flow and IndexedDB plus export/import foundation before beginning mine placement.
+- **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, save/load implementation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
+- **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
 
 ## Delivery and approval gates
 
@@ -139,13 +140,114 @@ Add more recipes, industries, vehicle types, settlement progression, regional pl
 - Final UI layout and information density.
 - Asset creation pipeline and model format.
 - Whether Angular should own the game shell only or also selected UI state.
-- The exact save format and versioning strategy.
+- The exact save schema, binary file format, and versioning/migration strategy for the approved local persistence direction.
 - Final procedural world size and streaming strategy.
 - Full electricity model, vehicle battery model, and economic balance.
 
-## Current first implementation definition
+## Approved persistence and entry-flow decisions
 
-The first implementation should be intentionally smaller than the vertical slice. It should establish the browser/Three.js foundation and prove the chosen camera and visual mood with:
+### 2026-08-13 — Browser-local persistence
+
+- **Decision:** Use IndexedDB as the primary local save store, with explicit export/import through portable save files. No backend, account system, or cloud synchronization is planned for the initial game.
+- **Selected direction:** IndexedDB + export/import.
+- **Rejected alternatives:** Seed/configuration-only saves were rejected because loading would depend on regenerating the map and could change old worlds when the generator evolves. File-first saves were rejected because requiring manual file management for ordinary play adds friction and makes autosaving less reliable.
+- **Consequences:**
+  - The game can support multiple local save slots and resume without regenerating the map every time.
+  - Export/import provides backup, transfer, and recovery when browser storage is cleared or unavailable.
+  - Save data must be versioned, validated, and designed for migration from the beginning.
+  - Three.js render objects, chunk caches, workers, and other runtime objects must not be serialized; saves contain map/session data that can rebuild the runtime scene.
+  - IndexedDB quota errors, private browsing restrictions, browser data clearing, and corrupted files require visible recovery messages and an export path.
+  - `localStorage` is reserved for lightweight preferences and the last active save reference, not authoritative world data.
+- **Implementation implication:** The initial save contract should distinguish map identity/configuration, authoritative map data, and mutable gameplay state. The current technical preference is to retain the generated authoritative map snapshot so generator changes do not rewrite an existing world, subject to final save-size validation.
+
+### 2026-08-13 — Dedicated start screen
+
+- **Decision:** Start the game in a dedicated entry screen with three primary choices: **Continue**, **Load Save**, and **New World**. Import and export belong inside the Load Save flow rather than being top-level start-screen actions.
+- **Selected direction:** Dedicated start screen.
+- **Rejected alternatives:** Workshop-first was rejected because it makes creating a new world and resuming an existing one less distinct. Automatic resume was rejected because it is less clear for first-time players and makes recovery from a broken or unwanted last save less obvious.
+- **Consequences:**
+  - Application startup must stop generating a map automatically before the player chooses New World or Continue.
+  - New World opens the Map Workshop and creates a new session only after the player accepts the generated map.
+  - Continue requires a remembered last-active save reference and must gracefully fall back to Load Save when no valid continuation exists.
+  - Load Save becomes the home for save-slot selection, import, export, deletion, and recovery messaging.
+  - The map workshop remains focused on world creation; save management does not need to crowd the workshop controls.
+- **Open follow-up questions:** Define save-slot naming, manual-save versus autosave behavior, deletion/recovery rules, and the final portable save-file format before implementing persistence.
+
+## Current implementation plan after map-preview approval
+
+Each milestone below is intentionally small and receives its own automated checks and manual approval gate.
+
+### Milestone 1 — World-session and save contract
+
+- Define `WorldSession`, versioned `SaveGame`, save-slot metadata, and the separation between map identity/configuration, authoritative map data, and mutable gameplay state.
+- Define serialization boundaries so Three.js meshes, materials, workers, chunk caches, and other runtime objects are never stored.
+- Keep the first contract ready for buildings without adding production, roads, vehicles, or economy.
+
+**Exit condition:** The application has a typed, versioned representation of an empty playable world that can later contain placed buildings.
+
+### Milestone 2 — Dedicated start screen and session routing
+
+- Replace automatic map generation on application startup with the approved start screen.
+- Add Continue, Load Save, and New World states.
+- Make New World open the existing Map Workshop and make Continue/Load Save enter a world session.
+- Handle empty-save and missing-last-save states clearly.
+
+**Exit condition:** The player can navigate between the start screen, Map Workshop, and an empty world session without ambiguous transitions.
+
+### Milestone 3 — IndexedDB and portable save persistence
+
+- Implement the IndexedDB repository for multiple local save slots.
+- Add save, load, delete, and last-active-save tracking.
+- Add export/import inside Load Save with format validation and version checks.
+- Keep `localStorage` limited to lightweight preferences and the last-active-save reference.
+
+**Exit condition:** An empty world can be saved, loaded, deleted, exported, and imported through the intended UI flows.
+
+### Milestone 4 — Empty-world round-trip approval
+
+- Test the complete flow: New World → generate → accept world → save → reload application → Continue.
+- Confirm the same map identity, map data, and session state are restored.
+- Test import/export recovery and visible storage or validation errors.
+
+**Exit condition:** The user approves the persistent empty-world flow before construction work begins.
+
+### Milestone 5 — Construction data foundation
+
+- Define grid-coordinate conversion, cell occupancy, building definitions, placed-building instances, and building serialization.
+- Define generic placement validation for map bounds, buildability, water, terrain slope, occupancy, and footprint.
+- Keep the rules data-driven so the mine is not hard-coded into the renderer.
+
+**Exit condition:** A building can be represented and validated in world state without requiring a final 3D model.
+
+### Milestone 6 — Selection and placeholder mine placement
+
+- Add cell selection and a selected-cell highlight.
+- Add a configurable placeholder mine footprint and placement preview.
+- Add valid/invalid feedback, placement, removal, and cancellation.
+- Save and reload the placed placeholder mine.
+
+**Exit condition:** The user can place and remove a placeholder mine, save it, reload it, and find it in the same location.
+
+### Milestone 7 — Mine blueprint and asset contract
+
+- Review the supplied mine blueprint.
+- Lock the grid footprint, ground-contact origin, orientation rules, terrain constraints, and relationship to resource deposits.
+- Confirm the model scale, naming, material, and LOD requirements against the existing environment asset conventions.
+
+**Exit condition:** The mine model can be created without changing the placement or save architecture.
+
+### Milestone 8 — First mine model integration
+
+- Create the low-poly mine asset.
+- Export and register it through the existing environment asset pipeline.
+- Replace the placeholder visual while preserving the same serialized building state.
+- Perform visual placement, camera-distance, save/reload, and removal checks.
+
+**Exit condition:** The first mine is a persistent, placeable building in the world, but extraction simulation remains a later milestone.
+
+## Completed first implementation definition
+
+The original first implementation established the browser/Three.js foundation and map-preview experience with:
 
 - one ground area
 - one grid representation
@@ -153,7 +255,7 @@ The first implementation should be intentionally smaller than the vertical slice
 - one or two lightweight placeholder forms for scale
 - no production, economy, trucks, settlements, or procedural world yet
 
-This is a technical and visual checkpoint, not a playable game. It must be reviewed manually before construction systems are added.
+This technical and visual checkpoint is complete and manually approved. The current work begins with Milestone 1 above.
 
 ## Update log
 
@@ -362,8 +464,8 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Made generation failures visible in the creation dock with a human-readable recovery message and retry action; raw worker details remain in the console for diagnostics.
 - Made normal workshop buttons use a pointer cursor and disabled generation controls use a wait cursor.
 - Made biome elevation thresholds relative to the generated water level so seed-specific absolute height ranges do not incorrectly classify nearly all land as mountains.
-- Added a regression specification for the previously failing seed `VM-e73c4b5c-89c5059b`; it now produces a valid starting basin.
-- `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, and `npx tsc -p tsconfig.spec.json --noEmit` pass. Karma execution remains environment-blocked because the test server cannot bind its port here.
+- Added a regression specification for the previously failing seed `VELUTINOUS-MANUL-e73c4b5c-89c5059b`; it now produces a valid starting basin.
+- `npm run build`, `npx tsc -p tsconfig.app.json --noEmit`, and `npx tsc -p tsconfig.spec.json --noEmit` pass. Browser unit-test execution remains environment-blocked because the test server cannot bind its port here.
 - No files were staged or committed.
 
 ### 2026-08-09 — Map Generation v1 Gate 6.3
@@ -415,7 +517,7 @@ The second revised sunset concept is the approved visual target. It defines the 
 ### 2026-08-10 — Playwright chunk-visibility investigation
 
 - Added Chromium Playwright configuration with a fixed 1440×900 viewport, Angular server reuse/startup, SwiftShader WebGL fallback, serial execution, and failure screenshots/traces/videos.
-- Added deterministic browser coverage for seed `VM-START-001`, generation-overlay input locking, WASD/arrows, middle-button orbit, right-button pan, wheel zoom, left-click no-op behavior, post-generation exploration, browser error collection, and chunk-streaming consistency.
+- Added deterministic browser coverage for seed `VELUTINOUS-MANUL-START-001`, generation-overlay input locking, WASD/arrows, middle-button orbit, right-button pan, wheel zoom, left-click no-op behavior, post-generation exploration, browser error collection, and chunk-streaming consistency.
 - Captured the requested reset, shallow, mid-angle, steep, edge, diagonal, and corner camera states with actual browser input events, plus the separate shallow-angle backward movement state. Each state records camera and chunk coordinate data attributes as JSON/text attachments and attempts a deterministic screenshot; no pixel baselines or disappearance assertions were added.
 - Extended only the existing `?debug=chunks` path with machine-readable camera state and chunk metrics. `?debug=chunks&metrics=only` is used by automation to avoid wireframe churn; the full debug view remains available for manual visual inspection.
 - Validation: `npx tsc -p tsconfig.app.json --noEmit`, `npm run typecheck:e2e`, `npm run e2e` (12 passed), `npm run build`, and `git diff --check` pass. Chromium was installed locally with `npx playwright install chromium`.
@@ -452,3 +554,16 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Made camera reset honor the configured minimum zoom even before map-specific constraints are installed.
 - Restored explicit WASD/arrow movement assertions, added exploration-dock state coverage, and made the hidden dock inaccessible to assistive technology while it is closed.
 - Validation: `npm run build`, all three TypeScript checks, `npm run test:ci` (36 passed), and `npm run e2e` (14 passed).
+
+### 2026-08-13 — Persistence and entry-flow decisions
+
+- Chose IndexedDB as the primary local save store with explicit portable export/import.
+- Chose a dedicated start screen with Continue, Load Save, and New World; import/export will live inside Load Save.
+- Recorded the rejected alternatives, consequences, and remaining save-format questions in the approved decision section above.
+- No persistence or start-screen implementation has been added yet; these decisions define the next foundation milestone before the final mine asset is integrated.
+
+### 2026-08-13 — Map creation and preview approval
+
+- User manually tested world creation and map preview.
+- User approved the current generation, starting-area handoff, and exploration-preview experience.
+- The map-preview approval gate is complete; the next gate is the dedicated start screen and local persistence foundation.

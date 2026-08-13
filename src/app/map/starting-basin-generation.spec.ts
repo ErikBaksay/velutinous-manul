@@ -53,7 +53,7 @@ describe('starting basin generation', () => {
   });
 
   it('keeps a high-elevation seed playable after relative biome classification', () => {
-    const config = { ...DEFAULT_MAP_CONFIG, seed: 'VM-e73c4b5c-89c5059b' };
+    const config = { ...DEFAULT_MAP_CONFIG, seed: 'VELUTINOUS-MANUL-e73c4b5c-89c5059b' };
     const data = generateMapData(config);
     const candidate = selectStartingBasinCandidate(data, config);
     repairStartingResources(data, candidate);
