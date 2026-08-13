@@ -40,9 +40,9 @@ export type LoadSaveReason =
           <p class="message" role="alert">
             The last active save could not be opened. Choose another world or import a backup.
           </p>
-        } @else {
-          <p class="message">Choose a local world or import a portable backup.</p>
         }
+
+        <p class="message">Choose a local world or import a portable backup.</p>
 
         @if (storageError) {
           <p class="error-message" role="alert">{{ storageError }}</p>

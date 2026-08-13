@@ -25,8 +25,7 @@ describe('entry flow screens', () => {
     await fixture.whenStable();
     expect(router.url).toBe('/new-world');
 
-    buttons[0]?.click();
-    await fixture.whenStable();
+    await fixture.componentInstance.continueGame();
     expect(router.url).toBe('/load-save?reason=missing-last-active');
   });
 

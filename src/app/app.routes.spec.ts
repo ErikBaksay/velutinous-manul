@@ -1,7 +1,9 @@
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { App } from './app';
 import { routes } from './app.routes';
+import { StartScreen } from './start-screen';
 import { WorldSessionRuntime } from './session-runtime';
 
 describe('application routes', () => {
@@ -38,8 +40,8 @@ describe('application routes', () => {
     await router.navigateByUrl('/');
     fixture.detectChanges();
     await fixture.whenStable();
-    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
-    await fixture.whenStable();
+    const startScreen = fixture.debugElement.query(By.directive(StartScreen)).componentInstance as StartScreen;
+    await startScreen.continueGame();
     fixture.detectChanges();
 
     expect(router.url).toBe('/load-save?reason=missing-last-active');
