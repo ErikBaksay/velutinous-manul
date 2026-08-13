@@ -18,6 +18,27 @@ import { RenderDiagnostics, RenderPassTimings } from './render-diagnostics';
 import { getRenderQualitySettings, RenderQualitySettings } from './render-quality';
 import { getRuntimeQueryParam } from './runtime-query';
 import { VisualAssetRegistry } from './visual-asset-registry';
+import {
+  BuildingDefinition,
+  CellCoordinate,
+  cellToWorldCenter,
+  getRotatedFootprintSize,
+  getConstructionTerrainSample,
+  terrainHitPointToCellCoordinate,
+} from './construction';
+import type { PlacedBuildingState } from './save/save-contract';
+import { clientPointToNormalizedDeviceCoordinate } from './construction/selection';
+
+export interface GameSceneCellInteractionCallbacks {
+  readonly onCellHover: (cell: CellCoordinate) => void;
+  readonly onCellClick: (cell: CellCoordinate) => void;
+  readonly onPointerLeave: () => void;
+}
+
+export interface GameScenePlacementPreview {
+  readonly occupiedCells: readonly CellCoordinate[];
+  readonly valid: boolean;
+}
 
 const CAMERA_ORBIT_RADIUS = Math.sqrt(90 ** 2 + 90 ** 2 + 90 ** 2);
 const CAMERA_FAR_PLANE = Math.ceil(
@@ -28,6 +49,7 @@ const CAMERA_MAP_EDGE_PADDING = 32;
 const CAMERA_MINIMUM_ELEVATION = 40;
 const CAMERA_MAXIMUM_ELEVATION = 88;
 const MAP_BACKDROP_SIZE = Math.max(MAP_WIDTH, MAP_HEIGHT) * 3;
+const MAP_DIMENSIONS = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
 
 export class GameScene {
   private readonly scene = new THREE.Scene();
@@ -43,6 +65,28 @@ export class GameScene {
   private readonly mapBackdrop: THREE.Mesh;
   private readonly mapCorners = createMapCorners();
   private readonly resizeObserver: ResizeObserver;
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly pointer = new THREE.Vector2();
+  private readonly selectedCellVisual = createSelectedCellVisual();
+  private readonly placementPreviewVisual = createPlacementPreviewVisual();
+  private readonly placedBuildingVisuals = new THREE.Group();
+  private readonly onCanvasPointerMove = (event: PointerEvent): void => {
+    const cell = this.getTerrainCellFromPointer(event.clientX, event.clientY);
+    if (cell) {
+      this.cellInteractionCallbacks?.onCellHover(cell);
+    }
+  };
+  private readonly onCanvasClick = (event: MouseEvent): void => {
+    const cell = this.getTerrainCellFromPointer(event.clientX, event.clientY);
+    if (cell) {
+      this.cellInteractionCallbacks?.onCellClick(cell);
+    }
+  };
+  private readonly onCanvasPointerLeave = (): void => {
+    this.cellInteractionCallbacks?.onPointerLeave();
+  };
+  private cellInteractionCallbacks: GameSceneCellInteractionCallbacks | null = null;
+  private mapData: AuthoritativeMapData | null = null;
   private frameHandle = 0;
   private previousFrameTime = performance.now();
   private lastCameraFar = Number.NaN;
@@ -84,7 +128,14 @@ export class GameScene {
     this.scene.background = new THREE.Color(0x76918e);
     this.scene.fog = new THREE.Fog(0x76918e, CAMERA_FOG_NEAR, CAMERA_FAR_PLANE);
     this.mapBackdrop = createMapBackdrop();
+    this.placedBuildingVisuals.name = 'construction-placed-buildings';
     this.scene.add(this.mapBackdrop);
+    this.scene.add(this.selectedCellVisual);
+    this.scene.add(this.placementPreviewVisual);
+    this.scene.add(this.placedBuildingVisuals);
+    this.canvas.addEventListener('pointermove', this.onCanvasPointerMove);
+    this.canvas.addEventListener('click', this.onCanvasClick);
+    this.canvas.addEventListener('pointerleave', this.onCanvasPointerLeave);
 
     this.addSoftLighting();
     const postProcessor = createPostProcessor(this.renderer, this.scene, this.camera, host, this.quality);
@@ -100,13 +151,17 @@ export class GameScene {
 
   destroy(): void {
     cancelAnimationFrame(this.frameHandle);
+    this.canvas.removeEventListener('pointermove', this.onCanvasPointerMove);
+    this.canvas.removeEventListener('click', this.onCanvasClick);
+    this.canvas.removeEventListener('pointerleave', this.onCanvasPointerLeave);
+    this.cellInteractionCallbacks = null;
     this.cameraController.dispose();
     this.chunkStreamingManager.destroy();
     this.visualAssetRegistry.destroy();
     this.chunkDebugVisualizer?.dispose();
     this.resizeObserver.disconnect();
     this.scene.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) {
+      if (!(object instanceof THREE.Mesh) && !(object instanceof THREE.Line)) {
         return;
       }
 
@@ -126,6 +181,10 @@ export class GameScene {
     seaLevelSample: number,
     startingCell?: number,
   ): Promise<void> {
+    this.mapData = data;
+    this.setSelectedCell(null);
+    this.setPlacementPreview(null);
+    this.clearPlacedBuildingVisuals();
     await this.visualAssetRegistry.load();
     this.chunkStreamingManager.beginMap(data, seaLevelSample);
     const seaLevelWorld = (seaLevelSample / 65_535) * TERRAIN_VERTICAL_SCALE + 0.08;
@@ -154,6 +213,118 @@ export class GameScene {
 
   setNavigationEnabled(enabled: boolean): void {
     this.cameraController.setNavigationEnabled(enabled);
+  }
+
+  setCellInteractionCallbacks(
+    callbacks: GameSceneCellInteractionCallbacks | null,
+  ): void {
+    this.cellInteractionCallbacks = callbacks;
+  }
+
+  setSelectedCell(cell: CellCoordinate | null): void {
+    if (!cell || !this.mapData) {
+      this.selectedCellVisual.visible = false;
+      return;
+    }
+
+    const center = cellToWorldCenter(cell, MAP_DIMENSIONS);
+    const terrain = getConstructionTerrainSample(this.mapData, MAP_DIMENSIONS, cell);
+    this.selectedCellVisual.position.set(center.x, terrain.elevationWorld + 0.06, center.z);
+    this.selectedCellVisual.visible = true;
+  }
+
+  setPlacementPreview(preview: GameScenePlacementPreview | null): void {
+    if (!preview || !this.mapData) {
+      this.placementPreviewVisual.visible = false;
+      return;
+    }
+
+    const color = preview.valid ? 0x72d69a : 0xf07878;
+    for (let index = 0; index < this.placementPreviewVisual.children.length; index += 1) {
+      const cellVisual = this.placementPreviewVisual.children[index];
+      if (!(cellVisual instanceof THREE.Group)) {
+        continue;
+      }
+      const cell = preview.occupiedCells[index];
+      cellVisual.visible = cell !== undefined;
+      if (!cell) {
+        continue;
+      }
+      const center = cellToWorldCenter(cell, MAP_DIMENSIONS);
+      const terrain = getConstructionTerrainSample(this.mapData, MAP_DIMENSIONS, cell);
+      cellVisual.position.set(center.x, terrain.elevationWorld + 0.09, center.z);
+      setCellVisualColor(cellVisual, color, 0.36, 0.98);
+    }
+    this.placementPreviewVisual.visible = preview.occupiedCells.length > 0;
+  }
+
+  setPlacedBuildings(
+    buildings: readonly PlacedBuildingState[],
+    definitions: ReadonlyMap<string, BuildingDefinition>,
+  ): void {
+    this.clearPlacedBuildingVisuals();
+    if (!this.mapData) {
+      return;
+    }
+
+    for (const building of buildings) {
+      const definition = definitions.get(building.definitionId);
+      if (!definition) {
+        continue;
+      }
+      const size = getRotatedFootprintSize(definition.footprint, building.rotationQuarterTurns);
+      const center = cellToWorldCenter(
+        { x: building.origin.x + size.width / 2 - 0.5, y: building.origin.y + size.height / 2 - 0.5 },
+        MAP_DIMENSIONS,
+      );
+      let baseElevation = 0;
+      for (let y = 0; y < size.height; y += 1) {
+        for (let x = 0; x < size.width; x += 1) {
+          baseElevation += getConstructionTerrainSample(
+            this.mapData,
+            MAP_DIMENSIONS,
+            { x: building.origin.x + x, y: building.origin.y + y },
+          ).elevationWorld;
+        }
+      }
+      baseElevation /= size.width * size.height;
+
+      const height = 2.8;
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(size.width * 0.82, height, size.height * 0.82),
+        new THREE.MeshStandardMaterial({
+          color: 0xb63c3c,
+          roughness: 0.78,
+          metalness: 0.05,
+        }),
+      );
+      mesh.name = `construction-building-${building.id}`;
+      mesh.position.set(center.x, baseElevation + height / 2, center.z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.placedBuildingVisuals.add(mesh);
+    }
+  }
+
+  private getTerrainCellFromPointer(clientX: number, clientY: number): CellCoordinate | null {
+    const bounds = this.canvas.getBoundingClientRect();
+    const normalized = clientPointToNormalizedDeviceCoordinate(clientX, clientY, bounds);
+    if (!normalized) {
+      return null;
+    }
+
+    this.pointer.set(normalized.x, normalized.y);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.chunkStreamingManager.raycastTerrain(this.raycaster);
+    if (!hit) {
+      return null;
+    }
+
+    return terrainHitPointToCellCoordinate({ x: hit.x, z: hit.z }, MAP_DIMENSIONS);
+  }
+
+  private clearPlacedBuildingVisuals(): void {
+    disposeObjectChildren(this.placedBuildingVisuals);
   }
 
   private readonly render = (): void => {
@@ -376,6 +547,88 @@ function createMapBackdrop(): THREE.Mesh {
   backdrop.position.y = CAMERA_NAVIGATION_PLANE_Y - 0.04;
   backdrop.renderOrder = -1;
   return backdrop;
+}
+
+function createSelectedCellVisual(): THREE.Group {
+  const visual = createCellVisual();
+  visual.name = 'construction-selected-cell';
+  setCellVisualColor(visual, 0xf0c08c, 0.24, 0.92);
+  visual.visible = false;
+  return visual;
+}
+
+function createPlacementPreviewVisual(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'construction-placement-preview';
+  for (let index = 0; index < 4; index += 1) {
+    const cellVisual = createCellVisual();
+    cellVisual.visible = false;
+    group.add(cellVisual);
+  }
+  group.visible = false;
+  return group;
+}
+
+function createCellVisual(): THREE.Group {
+  const group = new THREE.Group();
+  const tileGeometry = new THREE.PlaneGeometry(1, 1);
+  const tile = new THREE.Mesh(
+    tileGeometry,
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  tile.rotation.x = -Math.PI / 2;
+  tile.renderOrder = 5;
+
+  const border = new THREE.LineSegments(
+    new THREE.EdgesGeometry(tileGeometry),
+    new THREE.LineBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+    }),
+  );
+  border.rotation.x = -Math.PI / 2;
+  border.renderOrder = 6;
+
+  group.add(tile, border);
+  return group;
+}
+
+function setCellVisualColor(
+  group: THREE.Group,
+  color: number,
+  tileOpacity: number,
+  borderOpacity: number,
+): void {
+  const tile = group.children.find((child) => child instanceof THREE.Mesh);
+  if (tile instanceof THREE.Mesh && tile.material instanceof THREE.MeshBasicMaterial) {
+    tile.material.color.setHex(color);
+    tile.material.opacity = tileOpacity;
+  }
+  const border = group.children.find((child) => child instanceof THREE.LineSegments);
+  if (border instanceof THREE.LineSegments && border.material instanceof THREE.LineBasicMaterial) {
+    border.material.color.setHex(color);
+    border.material.opacity = borderOpacity;
+  }
+}
+
+function disposeObjectChildren(group: THREE.Group): void {
+  for (const child of [...group.children]) {
+    child.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+        object.geometry.dispose();
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => material.dispose());
+        } else {
+          object.material.dispose();
+        }
+      }
+    });
+    child.removeFromParent();
+  }
 }
 
 function createMapCorners(): readonly THREE.Vector3[] {

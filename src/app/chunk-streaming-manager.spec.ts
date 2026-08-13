@@ -88,6 +88,24 @@ describe('ChunkStreamingManager', () => {
     expect(settled.buildBudgetMs).toBe(STREAMING_BUILD_BUDGET_MS);
     manager.destroy();
   });
+
+  it('returns a terrain hit only from an attached chunk', async () => {
+    const scene = new THREE.Scene();
+    const manager = new ChunkStreamingManager(scene);
+    const camera = createCamera();
+
+    manager.beginMap(createEmptyAuthoritativeMapData(), 32_000);
+    const ready = manager.beginInitialView(camera);
+    runFrames(manager, camera, 240);
+    await ready;
+
+    const hit = manager.raycastTerrain(new THREE.Raycaster(
+      new THREE.Vector3(0.5, 100, 0.5),
+      new THREE.Vector3(0, -1, 0),
+    ));
+    expect(hit).not.toBeNull();
+    manager.destroy();
+  });
 });
 
 function runFrames(

@@ -9,10 +9,10 @@ Every implementation milestone is small enough to run and manually test. Work pa
 ## Current status
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
-- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestones 2–5 are implemented pending their focused review gates.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations.
-- **Current task:** Review the focused Milestone 5 construction data and save round-trip checks before adding visible selection and placeholder placement.
-- **Next planned work:** Milestone 6 selection and placeholder mine placement after construction foundation approval.
+- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestones 2–6 are implemented and manually approved.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placeholder mine placement, removal, and save/reload.
+- **Current task:** Prepare the Milestone 7 mine blueprint and asset contract.
+- **Next planned work:** Review a supplied mine blueprint, then lock the model contract before asset creation.
 - **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -247,6 +247,22 @@ Each milestone below is intentionally small and receives its own automated check
 - Save and reload the placed placeholder mine.
 
 **Exit condition:** The user can place and remove a placeholder mine, save it, reload it, and find it in the same location.
+
+**Implementation status:** Complete and manually approved. Added terrain-mesh raycast selection, Select and Mine tools, a data-driven 2×2 strict-land placeholder mine, valid/invalid preview feedback, multiple placement instances, removal, and red primitive visuals. Existing schema-version-2 gameplay state remains unchanged, including unknown-definition preservation.
+
+### Milestone 6 decisions and verification — 2026-08-13
+
+- **Selection surface:** Raycast only currently attached terrain chunks and convert the hit x/z position through the existing grid-coordinate utilities. Navigation-plane fallback was rejected because construction selection should reflect the rendered terrain and should not silently select during a streaming gap.
+- **Construction interaction:** Use a Select/Mine tool palette. Mine mode previews on terrain hover and places on a valid click; Cancel returns to Select. Rotation controls, roads, production, economy, vehicles, and resource binding remain deferred.
+- **Placeholder scope:** Support multiple generic `velutinous-manul-placeholder-mine` instances with deterministic IDs and no deposit/resource association. The definition uses a 2×2 footprint and strict-land policy (`maxSlope: 0.2`).
+- **Visuals:** Use translucent bordered cell tiles for selection and green/red footprint previews. Placed mines use simple opaque red boxes; the final mine model remains deferred to Milestone 8.
+- **Save/reload synchronization:** Persisted `placedBuildings` was present after reload, but async world-save completion could leave the scene visual set stale. Construction occupancy and visuals now resynchronize whenever the active world is replaced during initial load, manual save, autosave, placement, or removal.
+- **Manual verification:** Confirmed placement, multiple-instance behavior, removal, manual save, leave/reload, and same-location mine reconstruction in the local browser. No files were staged, committed, or pushed.
+
+### Milestone 7 preparation — 2026-08-13
+
+- The existing environment asset contract is available in `art/environment/README.md`: one world unit per terrain cell, Y-up, origin at ground contact, applied transforms, simple opaque materials, stable names, and paired LOD0/LOD1 geometry.
+- No mine blueprint, mine source scene, or mine asset specification is currently present in the workspace. Milestone 7 remains pending that input; no mine geometry or new asset contract is being invented ahead of review.
 
 ### Milestone 7 — Mine blueprint and asset contract
 

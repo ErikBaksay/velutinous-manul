@@ -10,6 +10,7 @@ import {
   calculateTerrainColor,
   calculateTerrainNormal,
   createChunkGeometry,
+  TerrainChunkRenderer,
 } from './terrain-chunk-renderer';
 
 describe('terrain chunks', () => {
@@ -76,6 +77,28 @@ describe('terrain chunks', () => {
 
     expect(lushColor.getHex()).not.toBe(dryColor.getHex());
     expect(lushColor.getHex()).not.toBe(neighboringRegionColor.getHex());
+  });
+
+  it('raycasts only attached terrain chunks and returns a world hit point', () => {
+    const data = createHeightOnlyData();
+    const scene = new THREE.Scene();
+    const renderer = new TerrainChunkRenderer(scene, data, [{ x: 16, y: 16 }]);
+    const raycaster = new THREE.Raycaster(
+      new THREE.Vector3(16.5, 100, 16.5),
+      new THREE.Vector3(0, -1, 0),
+    );
+
+    const hit = renderer.raycast(raycaster);
+    expect(hit).not.toBeNull();
+    expect(hit?.x).toBeCloseTo(16.5);
+    expect(hit?.z).toBeCloseTo(16.5);
+
+    const miss = renderer.raycast(new THREE.Raycaster(
+      new THREE.Vector3(48.5, 100, 16.5),
+      new THREE.Vector3(0, -1, 0),
+    ));
+    expect(miss).toBeNull();
+    renderer.destroy();
   });
 });
 

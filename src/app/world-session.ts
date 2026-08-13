@@ -7,7 +7,22 @@ import {
   inject,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import type { WorldSession as WorldSessionData } from './save/save-contract';
+import {
+  createUpdatedWorldSession,
+  type PlacedBuildingState,
+  type WorldSession as WorldSessionData,
+} from './save/save-contract';
+import {
+  cellCoordinateToIndex,
+  createCellOccupancy,
+  createVelutinousManulConstructionDefinitionRegistry,
+  getOccupyingBuildingId,
+  type CellCoordinate,
+  type CellOccupancy,
+  type PlacementValidationResult,
+  validateBuildingPlacement,
+  VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+} from './construction';
 import { getRuntimeQueryParams } from './runtime-query';
 import {
   SaveActionError,
@@ -37,6 +52,42 @@ import { WorldSessionRuntime } from './session-runtime';
         <p class="save-note" [class.is-error]="saveError" role="status">
           {{ saveError ?? saveMessage }}
         </p>
+        @if (selectedCell) {
+          <p class="selected-cell" data-testid="selected-cell">
+            Selected cell: {{ selectedCell.x }}, {{ selectedCell.y }}
+          </p>
+        }
+        <section class="construction-tools" aria-labelledby="construction-title">
+          <h2 id="construction-title">Construction</h2>
+          <div class="tool-palette" role="group" aria-label="Construction tools">
+            <button
+              type="button"
+              [class.is-active]="activeTool === 'select'"
+              (click)="selectTool()"
+            >Select</button>
+            <button
+              type="button"
+              [class.is-active]="activeTool === 'mine'"
+              (click)="activateMineTool()"
+            >Mine</button>
+          </div>
+          @if (activeTool === 'mine') {
+            <p class="tool-note">Hover over land to preview a 2×2 placeholder mine.</p>
+            <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
+          }
+          @if (placementMessage) {
+            <p
+              class="placement-message"
+              [class.is-error]="placementPreview && !placementPreview.valid"
+              role="status"
+            >{{ placementMessage }}</p>
+          }
+          @if (selectedPlaceholderMine) {
+            <button class="remove-action" type="button" (click)="removeSelectedMine()">
+              Remove Selected Mine
+            </button>
+          }
+        </section>
         @if (sceneError) {
           <p class="scene-error" role="alert">{{ sceneError }}</p>
         }
@@ -154,6 +205,73 @@ import { WorldSessionRuntime } from './session-runtime';
         color: #efb29c;
       }
 
+      .selected-cell {
+        margin: 0 0 4px;
+        color: #f0c08c;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+      }
+
+      .construction-tools {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(247, 232, 214, 0.12);
+      }
+
+      .construction-tools h2 {
+        font-size: 12px;
+      }
+
+      .tool-palette {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+
+      .tool-palette button,
+      .remove-action {
+        padding: 9px 10px;
+        color: #d9d0c7;
+        background: rgba(255, 247, 237, 0.05);
+        border: 1px solid rgba(247, 232, 214, 0.14);
+        border-radius: 7px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .tool-palette button.is-active {
+        color: #fff3e4;
+        background: rgba(186, 111, 69, 0.62);
+        border-color: rgba(242, 184, 126, 0.58);
+      }
+
+      .tool-note,
+      .placement-message {
+        margin: 0;
+        color: #b9b0a7;
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      .placement-message {
+        color: #94ddb0;
+      }
+
+      .placement-message.is-error {
+        color: #ef9a9a;
+      }
+
+      .remove-action {
+        width: 100%;
+        color: #efc0ad;
+        background: rgba(143, 60, 50, 0.26);
+        border-color: rgba(239, 154, 140, 0.32);
+      }
+
       .scene-error {
         margin: 10px 0 0;
         color: #efb29c;
@@ -238,14 +356,20 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly sessionRuntime = inject(WorldSessionRuntime);
   private readonly persistence = inject(SavePersistenceService);
+  private readonly constructionDefinitions = createVelutinousManulConstructionDefinitionRegistry();
   private gameScene: import('./game-scene').GameScene | null = null;
   private isDestroyed = false;
   private autosaveTimer: ReturnType<typeof setInterval> | null = null;
   private autosavePromise: Promise<boolean> | null = null;
   world: WorldSessionData | null = this.sessionRuntime.getActiveWorld();
+  private occupancy: CellOccupancy = createEmptyOccupancy();
   sceneError: string | null = null;
   saveError: string | null = null;
   saveMessage = 'Autosave is preparing…';
+  selectedCell: CellCoordinate | null = null;
+  activeTool: 'select' | 'mine' = 'select';
+  placementPreview: PlacementValidationResult | null = null;
+  placementMessage: string | null = null;
   showSaveDialog = false;
   manualSaveName = '';
   isSaving = false;
@@ -258,6 +382,8 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       });
       return;
     }
+
+    this.rebuildOccupancy();
 
     void this.performAutosave();
     this.autosaveTimer = setInterval(() => {
@@ -273,6 +399,11 @@ export class WorldSession implements AfterViewInit, OnDestroy {
           this.gameCanvas.nativeElement,
           this.sceneFrame.nativeElement,
         );
+        this.gameScene.setCellInteractionCallbacks({
+          onCellHover: (cell) => this.handleCellHover(cell),
+          onCellClick: (cell) => this.handleCellClick(cell),
+          onPointerLeave: () => this.handlePointerLeave(),
+        });
         this.gameScene.setNavigationEnabled(false);
         return this.gameScene.setMapData(
           this.world.map.authoritativeData,
@@ -282,6 +413,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       })
       .then(() => {
         if (!this.isDestroyed) {
+          this.syncConstructionVisuals();
           this.gameScene?.setNavigationEnabled(true);
         }
       })
@@ -329,6 +461,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       }
       this.world = saved.world;
       this.sessionRuntime.setActiveWorld(saved.world);
+      this.syncConstructionVisuals();
       this.saveMessage = `Saved ${saved.slotName}. Autosave remains active.`;
       this.showSaveDialog = false;
     } catch (error: unknown) {
@@ -340,6 +473,173 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   readInputValue(event: Event): string {
     return (event.target as HTMLInputElement).value;
+  }
+
+  selectTool(): void {
+    this.activeTool = 'select';
+    this.placementPreview = null;
+    this.placementMessage = null;
+    this.gameScene?.setPlacementPreview(null);
+  }
+
+  activateMineTool(): void {
+    this.activeTool = 'mine';
+    this.placementMessage = 'Move over terrain to preview a placeholder mine.';
+    if (this.selectedCell) {
+      this.updatePlacementPreview(this.selectedCell);
+    }
+  }
+
+  cancelPlacement(): void {
+    this.selectTool();
+  }
+
+  get selectedPlaceholderMine(): PlacedBuildingState | null {
+    if (!this.world || !this.selectedCell) {
+      return null;
+    }
+    const cellIndex = cellCoordinateToIndex(
+      this.selectedCell,
+      this.getGridDimensions(),
+    );
+    if (cellIndex === null) {
+      return null;
+    }
+    const buildingId = getOccupyingBuildingId(this.occupancy, cellIndex);
+    return this.world.gameplay.placedBuildings.find((building) =>
+      building.id === buildingId &&
+      building.definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+    ) ?? null;
+  }
+
+  removeSelectedMine(): void {
+    const selectedMine = this.selectedPlaceholderMine;
+    if (!selectedMine || !this.world) {
+      return;
+    }
+    this.updatePlacedBuildings(this.world.gameplay.placedBuildings.filter((building) =>
+      building.id !== selectedMine.id,
+    ));
+    this.placementMessage = 'Removed the selected placeholder mine.';
+    if (this.activeTool === 'mine' && this.selectedCell) {
+      this.updatePlacementPreview(this.selectedCell);
+    }
+  }
+
+  private selectCell(cell: CellCoordinate): void {
+    this.selectedCell = { x: cell.x, y: cell.y };
+    this.gameScene?.setSelectedCell(this.selectedCell);
+  }
+
+  private handleCellHover(cell: CellCoordinate): void {
+    if (this.activeTool === 'mine') {
+      this.updatePlacementPreview(cell);
+    }
+  }
+
+  private handleCellClick(cell: CellCoordinate): void {
+    if (this.activeTool === 'mine') {
+      this.placePlaceholderMine(cell);
+      return;
+    }
+    this.selectCell(cell);
+  }
+
+  private handlePointerLeave(): void {
+    if (this.activeTool !== 'mine') {
+      return;
+    }
+    this.placementPreview = null;
+    this.placementMessage = 'Move over terrain to preview a placeholder mine.';
+    this.gameScene?.setPlacementPreview(null);
+  }
+
+  private updatePlacementPreview(origin: CellCoordinate): void {
+    const validation = this.validatePlaceholderMine(origin);
+    this.placementPreview = validation;
+    this.placementMessage = validation.valid
+      ? 'Valid placement — click to place the placeholder mine.'
+      : `Cannot place mine: ${getPlacementFailureMessage(validation)}`;
+    this.gameScene?.setPlacementPreview(validation);
+  }
+
+  private placePlaceholderMine(origin: CellCoordinate): void {
+    if (!this.world) {
+      return;
+    }
+    const validation = this.validatePlaceholderMine(origin);
+    if (!validation.valid) {
+      this.placementPreview = validation;
+      this.placementMessage = `Cannot place mine: ${getPlacementFailureMessage(validation)}`;
+      this.gameScene?.setPlacementPreview(validation);
+      return;
+    }
+
+    const building: PlacedBuildingState = {
+      id: createNextPlaceholderMineId(this.world.gameplay.placedBuildings),
+      definitionId: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+      origin: { x: origin.x, y: origin.y },
+      rotationQuarterTurns: 0,
+    };
+    this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building]);
+    this.selectCell(origin);
+    this.placementMessage = `Placed placeholder mine at ${origin.x}, ${origin.y}.`;
+    this.placementPreview = null;
+    this.gameScene?.setPlacementPreview(null);
+  }
+
+  private validatePlaceholderMine(origin: CellCoordinate): PlacementValidationResult {
+    if (!this.world) {
+      throw new Error('Cannot validate placement without an active world.');
+    }
+    return validateBuildingPlacement({
+      dimensions: this.getGridDimensions(),
+      mapData: this.world.map.authoritativeData,
+      definitions: this.constructionDefinitions,
+      occupancy: this.occupancy,
+      definitionId: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+      origin,
+      rotationQuarterTurns: 0,
+    });
+  }
+
+  private updatePlacedBuildings(placedBuildings: readonly PlacedBuildingState[]): void {
+    if (!this.world) {
+      return;
+    }
+    this.world = createUpdatedWorldSession({
+      ...this.world,
+      gameplay: { placedBuildings },
+    });
+    this.sessionRuntime.setActiveWorld(this.world);
+    this.syncConstructionVisuals();
+  }
+
+  private syncConstructionVisuals(): void {
+    this.rebuildOccupancy();
+    this.gameScene?.setPlacedBuildings(
+      this.world?.gameplay.placedBuildings ?? [],
+      this.constructionDefinitions,
+    );
+  }
+
+  private rebuildOccupancy(): void {
+    if (!this.world) {
+      this.occupancy = createEmptyOccupancy();
+      return;
+    }
+    this.occupancy = createCellOccupancy(
+      this.getGridDimensions(),
+      this.world.gameplay.placedBuildings,
+      this.constructionDefinitions,
+    ).occupancy;
+  }
+
+  private getGridDimensions(): { width: number; height: number } {
+    return {
+      width: this.world?.map.configuration.width ?? 1,
+      height: this.world?.map.configuration.height ?? 1,
+    };
   }
 
   async leaveWorld(): Promise<void> {
@@ -386,6 +686,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       const saved = await this.persistence.saveAutosave(this.world);
       this.world = saved.world;
       this.sessionRuntime.setActiveWorld(saved.world);
+      this.syncConstructionVisuals();
       this.saveError = null;
       this.saveMessage = `Autosaved at ${new Date(saved.world.updatedAt).toLocaleTimeString()}.`;
       return true;
@@ -402,6 +703,47 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       clearInterval(this.autosaveTimer);
       this.autosaveTimer = null;
     }
+  }
+}
+
+function createEmptyOccupancy(): CellOccupancy {
+  return {
+    width: 1,
+    height: 1,
+    ownerByCell: new Int32Array([-1]),
+    buildingIds: [],
+  };
+}
+
+function createNextPlaceholderMineId(
+  buildings: readonly PlacedBuildingState[],
+): string {
+  const existingIds = new Set(buildings.map((building) => building.id));
+  let ordinal = 1;
+  while (existingIds.has(`${VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID}-${ordinal}`)) {
+    ordinal += 1;
+  }
+  return `${VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID}-${ordinal}`;
+}
+
+function getPlacementFailureMessage(validation: PlacementValidationResult): string {
+  const failure = validation.failures[0];
+  switch (failure?.code) {
+    case 'origin-out-of-bounds':
+    case 'footprint-out-of-bounds':
+      return 'the mine footprint is outside the map';
+    case 'not-buildable':
+      return 'the terrain is not buildable';
+    case 'impassable':
+      return 'the terrain is impassable';
+    case 'water':
+      return 'the mine must be placed on land';
+    case 'slope-too-steep':
+      return 'the terrain is too steep';
+    case 'occupied':
+      return 'the footprint is occupied';
+    default:
+      return 'the selected location is invalid';
   }
 }
 

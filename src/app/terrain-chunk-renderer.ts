@@ -93,6 +93,11 @@ export class TerrainChunkRenderer {
   getAttachedCount(): number {
     return this.chunks.size;
   }
+
+  raycast(raycaster: THREE.Raycaster): THREE.Vector3 | null {
+    const intersections = raycaster.intersectObjects([...this.chunks.values()], false);
+    return intersections[0]?.point.clone() ?? null;
+  }
 }
 
 export function createChunkGeometry(

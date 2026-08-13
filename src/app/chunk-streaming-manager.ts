@@ -212,6 +212,10 @@ export class ChunkStreamingManager {
     return this.currentSelection;
   }
 
+  raycastTerrain(raycaster: THREE.Raycaster): THREE.Vector3 | null {
+    return this.terrainRenderer?.raycast(raycaster) ?? null;
+  }
+
   getDiagnostics(): ChunkStreamingDiagnostics {
     let attachedCount = 0;
     let retainedCount = 0;
