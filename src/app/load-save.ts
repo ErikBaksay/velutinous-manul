@@ -21,10 +21,11 @@ export type LoadSaveReason = 'missing-last-active' | 'session-unavailable' | nul
             This world session is no longer available. Unsaved sessions are cleared when the page is reloaded.
           </p>
         } @else {
-          <p class="message">
-            No saved worlds are available yet. Local save storage and portable import/export will arrive in a later milestone.
-          </p>
+          <p class="message">No saved worlds are available yet.</p>
         }
+        <p class="message">
+          Local save storage and portable import/export will arrive in a later milestone.
+        </p>
 
         <div class="empty-state" role="status">
           <span class="empty-mark" aria-hidden="true">○</span>
