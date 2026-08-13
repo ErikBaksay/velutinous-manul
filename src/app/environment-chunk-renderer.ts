@@ -15,6 +15,7 @@ import {
 } from './terrain-chunk-renderer';
 import { getTerrainCellCache } from './terrain-cell-cache';
 import { getRenderQualitySettings, RenderQualitySettings } from './render-quality';
+import { getRuntimeQueryParam } from './runtime-query';
 import { AssetPrototype, VisualAssetFamily, VisualAssetRegistry } from './visual-asset-registry';
 import { MAP_HEIGHT, MAP_WIDTH } from './map/map-types';
 
@@ -258,7 +259,7 @@ export class EnvironmentChunkRenderer {
 }
 
 function isDiagnosticsRender(): boolean {
-  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === 'chunks';
+  return getRuntimeQueryParam('debug') === 'chunks';
 }
 
 export function countEnvironmentPlacements(

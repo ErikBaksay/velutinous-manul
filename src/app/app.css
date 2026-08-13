@@ -77,6 +77,27 @@ canvas:focus-visible {
   line-height: 1;
 }
 
+.workshop-back-button {
+  display: inline-flex;
+  margin: 0 0 18px;
+  padding: 0;
+  color: #a9a097;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.workshop-back-button:hover {
+  color: #f0c08c;
+}
+
+.workshop-back-button:focus-visible {
+  outline: 2px solid #f0c08c;
+  outline-offset: 3px;
+}
+
 .dock-close:hover,
 .dock-reopen:hover {
   filter: brightness(1.12);
@@ -111,6 +132,36 @@ canvas:focus-visible {
 .dock-reopen-mark {
   color: #d8a06f;
   font-size: 13px;
+}
+
+.accept-world-button {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 152px;
+  padding: 11px 14px;
+  color: #fff3e4;
+  background: linear-gradient(100deg, rgba(186, 111, 69, 0.9), rgba(128, 78, 55, 0.88));
+  border: 1px solid rgba(242, 184, 126, 0.62);
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(14, 17, 21, 0.28);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.accept-world-button:hover {
+  filter: brightness(1.12);
+}
+
+.accept-world-button:focus-visible {
+  outline: 2px solid #f0c08c;
+  outline-offset: 3px;
 }
 
 .eyebrow,

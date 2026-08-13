@@ -18,6 +18,7 @@ import {
 } from './environment-chunk-renderer';
 import { AuthoritativeMapData } from './map/map-types';
 import { getRenderQualitySettings, RenderQualitySettings } from './render-quality';
+import { getRuntimeQueryParam } from './runtime-query';
 import { TerrainChunkRenderer } from './terrain-chunk-renderer';
 import { VisualAssetRegistry } from './visual-asset-registry';
 import { WaterChunkObjects, WaterChunkRenderer } from './water-chunk-renderer';
@@ -572,6 +573,5 @@ function getActiveBuildBudgetMs(): number {
 }
 
 function isChunkDebugEnabled(): boolean {
-  return typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('debug') === 'chunks';
+  return getRuntimeQueryParam('debug') === 'chunks';
 }

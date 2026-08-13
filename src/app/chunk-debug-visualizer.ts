@@ -16,6 +16,7 @@ import {
 } from './chunk-visibility';
 import { ChunkStreamingDiagnostics } from './chunk-streaming-manager';
 import { RenderDiagnostics } from './render-diagnostics';
+import { getRuntimeQueryParam } from './runtime-query';
 import { TERRAIN_CHUNK_SIZE } from './terrain-chunk-renderer';
 
 export class ChunkDebugVisualizer {
@@ -33,8 +34,7 @@ export class ChunkDebugVisualizer {
   private lastSignature = '';
 
   constructor(scene: THREE.Scene, host: HTMLElement) {
-    this.metricsOnly = typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('metrics') === 'only';
+    this.metricsOnly = getRuntimeQueryParam('metrics') === 'only';
     this.group.name = 'chunk-stream-debug';
     this.visibleGroup.name = 'visible-chunks';
     this.prefetchGroup.name = 'prefetch-chunks';

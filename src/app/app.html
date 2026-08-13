@@ -12,6 +12,7 @@
       @if (isExploring) {
         <button class="dock-close" type="button" aria-label="Hide world settings" (click)="closeDock()">×</button>
       }
+      <button class="workshop-back-button" type="button" (click)="returnToStart()">Back to Start</button>
       <p class="eyebrow">VELUTINOUS MANUL</p>
       <h1 id="creation-title">Create New World</h1>
       <p class="dock-intro">
@@ -120,6 +121,13 @@
     </button>
   }
 
+  @if (canAcceptWorld) {
+    <button class="accept-world-button" type="button" (click)="acceptWorld()">
+      <span>Accept World</span>
+      <span aria-hidden="true">→</span>
+    </button>
+  }
+
   <div
     class="generation-overlay"
     [class.is-visible]="overlayState !== 'hidden'"
@@ -175,7 +183,13 @@
           <div><span>Generation time</span><strong>{{ formatDuration(lastMapSummary?.generationDurationMs ?? 0) }}</strong></div>
         </div>
 
-        <div class="starting-area-confirmation"><span class="confirmation-mark">✓</span><span>Starting area secure</span></div>
+        <div
+          class="starting-area-confirmation"
+          data-testid="generated-starting-cell"
+          [attr.data-starting-cell]="lastMapSummary?.startingCell"
+        >
+          <span class="confirmation-mark">✓</span><span>Starting area secure</span>
+        </div>
         <p class="generation-memory-note">
           Memory estimate: {{ formatMemory(lastMapSummary?.estimatedFinalBytes ?? 0) }} final ·
           {{ formatMemory(lastMapSummary?.estimatedPeakBytes ?? 0) }} peak

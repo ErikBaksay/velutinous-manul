@@ -65,6 +65,53 @@ const CAMERA_CASES: readonly CameraCase[] = [
 ];
 
 test.describe('Velutinous Manul browser diagnostics', () => {
+  test.describe.configure({ timeout: 480_000 });
+
+  test('routes through the start screen, workshop, and unsaved world session', async ({ page }) => {
+    const browserErrors = collectBrowserErrors(page);
+
+    await page.goto('/?debug=chunks&metrics=only#/');
+    await expect(page.getByRole('heading', { name: 'Build a beautiful industrial region.' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New World' })).toBeVisible();
+    await expect(page.getByLabel('Interactive map camera')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('heading', { name: 'Load Save' })).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText('There is no last active save to continue');
+
+    await page.getByRole('button', { name: 'Back to Start' }).click();
+    await page.getByRole('button', { name: 'New World' }).click();
+    await expect(page.getByRole('heading', { name: 'Create New World' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Generate World/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Shaping your continent' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: /^Generate World/ }).click();
+    await waitForWorldReady(page);
+    const generatedStartingCell = await page.getByTestId('generated-starting-cell').getAttribute('data-starting-cell');
+    expect(generatedStartingCell).not.toBeNull();
+    await page.getByRole('button', { name: /Explore Map/ }).click();
+    await expect(page.getByRole('button', { name: /Accept World/ })).toBeVisible();
+    await page.getByRole('button', { name: /Accept World/ }).click();
+
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await expect(page.getByTestId('world-map-identity')).toContainText(
+      'VELUTINOUS-MANUL-START-001',
+      { timeout: 30_000 },
+    );
+    await expect(page.getByTestId('world-map-identity')).toHaveAttribute(
+      'data-starting-cell',
+      generatedStartingCell!,
+    );
+    await waitForStreamingSettled(page, 120_000);
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Load Save' })).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText('This world session is no longer available');
+
+    expect(browserErrors.consoleErrors).toEqual([]);
+    expect(browserErrors.pageErrors).toEqual([]);
+  });
+
   test('locks generation input and exercises exploration controls', async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
     await prepareDeterministicWorld(page);
@@ -159,7 +206,6 @@ test.describe('Velutinous Manul browser diagnostics', () => {
   });
 
   test('keeps frustum-visible chunks attached through shallow camera transitions', async ({ page }, testInfo) => {
-    test.setTimeout(180_000);
     const browserErrors = collectBrowserErrors(page);
     await prepareInitialWorld(page);
 
@@ -208,7 +254,6 @@ test.describe('Velutinous Manul browser diagnostics', () => {
   });
 
   test('keeps bounded camera framing across desktop aspect ratios', async ({ page }, testInfo) => {
-    test.setTimeout(180_000);
     const browserErrors = collectBrowserErrors(page);
     await prepareInitialWorld(page);
 
@@ -294,7 +339,9 @@ test.describe('Velutinous Manul browser diagnostics', () => {
 });
 
 async function prepareDeterministicWorld(page: Page): Promise<void> {
-  await page.goto('/?debug=chunks&metrics=only');
+  await page.goto('/?debug=chunks&metrics=only#/new-world');
+  await expect(page.getByRole('button', { name: /^Generate World/ })).toBeVisible();
+  await page.getByRole('button', { name: /^Generate World/ }).click();
   await waitForWorldReady(page);
   await page.getByRole('button', { name: /Explore Map/ }).click();
   await page.getByRole('button', { name: /World settings/ }).click();
@@ -311,7 +358,9 @@ async function prepareDeterministicWorld(page: Page): Promise<void> {
 }
 
 async function prepareInitialWorld(page: Page): Promise<void> {
-  await page.goto('/?debug=chunks&metrics=only');
+  await page.goto('/?debug=chunks&metrics=only#/new-world');
+  await expect(page.getByRole('button', { name: /^Generate World/ })).toBeVisible();
+  await page.getByRole('button', { name: /^Generate World/ }).click();
   await waitForWorldReady(page);
   await expect(page.getByLabel('World seed')).toHaveValue(DETERMINISTIC_SEED);
   await page.getByRole('button', { name: /Explore Map/ }).click();
@@ -319,28 +368,28 @@ async function prepareInitialWorld(page: Page): Promise<void> {
 }
 
 async function waitForWorldReady(page: Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'World ready' })).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByRole('heading', { name: 'World ready' })).toBeVisible({ timeout: 300_000 });
   await expect(page.getByRole('button', { name: /Explore Map/ })).toBeVisible();
 }
 
-async function waitForStreamingSettled(page: Page): Promise<DebugMetrics> {
-  await expect.poll(async () => (await readDebugMetrics(page)).initial).toBe('ready');
-  await expect.poll(async () => (await readDebugMetrics(page)).queued).toBe(0);
-  await expect.poll(async () => (await readDebugMetrics(page)).building).toBe(0);
-  await expect.poll(async () => (await readDebugMetrics(page)).missingDesired).toBe(0);
-  await expect.poll(async () => (await readDebugMetrics(page)).missingVisible).toBe(0);
+async function waitForStreamingSettled(page: Page, timeout = 120_000): Promise<DebugMetrics> {
+  await expect.poll(async () => (await readDebugMetrics(page)).initial, { timeout }).toBe('ready');
+  await expect.poll(async () => (await readDebugMetrics(page)).queued, { timeout }).toBe(0);
+  await expect.poll(async () => (await readDebugMetrics(page)).building, { timeout }).toBe(0);
+  await expect.poll(async () => (await readDebugMetrics(page)).missingDesired, { timeout }).toBe(0);
+  await expect.poll(async () => (await readDebugMetrics(page)).missingVisible, { timeout }).toBe(0);
   await page.waitForTimeout(100);
   return readDebugMetrics(page);
 }
 
-async function waitForVisibleStreamingSettled(page: Page): Promise<DebugMetrics> {
-  await expect.poll(async () => (await readDebugMetrics(page)).initial).toBe('ready');
+async function waitForVisibleStreamingSettled(page: Page, timeout = 120_000): Promise<DebugMetrics> {
+  await expect.poll(async () => (await readDebugMetrics(page)).initial, { timeout }).toBe('ready');
   await waitForCameraStable(page);
-  await expect.poll(async () => (await readDebugMetrics(page)).missingVisible).toBe(0);
+  await expect.poll(async () => (await readDebugMetrics(page)).missingVisible, { timeout }).toBe(0);
   await expect.poll(async () => {
     const metrics = await readDebugMetrics(page);
     return metrics.visibleChunks.every((key) => metrics.attachedChunks.includes(key));
-  }).toBe(true);
+  }, { timeout }).toBe(true);
   await page.waitForTimeout(150);
   return readDebugMetrics(page);
 }

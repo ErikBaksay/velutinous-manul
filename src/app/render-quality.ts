@@ -1,3 +1,5 @@
+import { getRuntimeQueryParam } from './runtime-query';
+
 export type RenderQualityPreset = 'low' | 'balanced' | 'high';
 
 export interface RenderQualitySettings {
@@ -57,7 +59,7 @@ export function getRenderQualitySettings(): RenderQualitySettings {
     return QUALITY_SETTINGS.balanced;
   }
 
-  const requested = new URLSearchParams(window.location.search).get('quality');
+  const requested = getRuntimeQueryParam('quality');
   if (requested === 'low' || requested === 'balanced' || requested === 'high') {
     return QUALITY_SETTINGS[requested];
   }

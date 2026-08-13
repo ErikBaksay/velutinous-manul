@@ -9,10 +9,10 @@ Every implementation milestone is small enough to run and manually test. Work pa
 ## Current status
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
-- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved.
-- **Current task:** Prepare the dedicated start-screen and local-save foundation milestone.
-- **Next planned work:** Implement the approved Continue / Load Save / New World entry flow and IndexedDB plus export/import foundation before beginning mine placement.
+- **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestone 2 is implemented and awaiting manual review.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing implemented.
+- **Current task:** Manually review the Milestone 2 start, workshop, empty-save, and unsaved-world states.
+- **Next planned work:** After approval, implement the Milestone 3 persistence foundation before beginning mine placement.
 - **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, save/load implementation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -29,6 +29,8 @@ Every implementation milestone is small enough to run and manually test. Work pa
 8. Begin the next step only after approval.
 
 No large batch of unreviewed features should cross an approval gate.
+
+During intermediate milestones, use targeted checks for the riskiest changes plus manual review; do not spend time running the full unit/e2e suite after every milestone. Run the complete verification suite only after multiple milestones, when the user explicitly requests it.
 
 ## Proposed incremental roadmap
 
@@ -567,3 +569,13 @@ The second revised sunset concept is the approved visual target. It defines the 
 - User manually tested world creation and map preview.
 - User approved the current generation, starting-area handoff, and exploration-preview experience.
 - The map-preview approval gate is complete; the next gate is the dedicated start screen and local persistence foundation.
+
+### 2026-08-13 — Milestone 2 — Dedicated start screen and session routing
+
+- Replaced automatic startup generation with hash-based Angular Router states for the start screen, Map Workshop, Load Save, and guarded in-memory World Session routes.
+- Added Continue, Load Save, and New World actions with honest missing-save messaging; persistence, save slots, import, and export remain deferred to Milestone 3.
+- Added the ephemeral `WorldSessionRuntime`, exact generated configuration snapshots, authoritative map handoff, Accept World navigation, unsaved-session warning, and reload/direct-access guarding.
+- Preserved the approved World Forge → Explore Map flow and adapted browser diagnostics to preserve debug query parameters across hash navigation.
+- Verification: application/spec/e2e TypeScript checks and `git diff --check` pass; the focused start-screen → workshop → accept → world → reload Playwright flow passes in 1 test.
+- `npm run test:ci` and `npm run build` still exit 134 during Angular's `Building...` phase in this local environment. One adapted legacy camera test exceeded the extended slow-machine browser budget while the existing chunk-streaming/input loop was still active.
+- Manual approval status: pending review of the four application states and the unsaved-session handoff. No files were staged, committed, or pushed by the assistant.

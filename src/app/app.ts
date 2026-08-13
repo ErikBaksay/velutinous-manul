@@ -1,5 +1,14 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  OnDestroy,
+  ViewChild,
+  inject,
+} from '@angular/core';
+import { Router, RouterOutlet } from '@angular/router';
+import {
+  AuthoritativeMapData,
   DEFAULT_MAP_CONFIG,
   GenerationPhase,
   MAX_WATER_COVERAGE,
@@ -9,6 +18,9 @@ import {
 } from './map/map-types';
 import { MapWorkerClient } from './map/map-worker.client';
 import { normalizeMapConfig } from './map/map-identity';
+import { getRuntimeQueryParams } from './runtime-query';
+import { createWorldSession } from './save/save-contract';
+import { WorldSessionRuntime } from './session-runtime';
 
 type MapSetting = 'waterCoverage' | 'terrainRoughness' | 'forestDensity' | 'resourceAbundance';
 
@@ -48,11 +60,27 @@ export const GENERATION_MILESTONES: readonly GenerationMilestone[] = [
 
 @Component({
   selector: 'app-root',
+  imports: [RouterOutlet],
+  template: '<router-outlet></router-outlet>',
+  styles: [
+    `
+      :host {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    `,
+  ],
+})
+export class App {}
+
+@Component({
+  selector: 'app-world-workshop',
   imports: [],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App implements AfterViewInit, OnDestroy {
+export class WorldWorkshop implements AfterViewInit, OnDestroy {
   @ViewChild('sceneFrame', { static: true })
   private readonly sceneFrame!: ElementRef<HTMLElement>;
 
@@ -61,13 +89,21 @@ export class App implements AfterViewInit, OnDestroy {
 
   private gameScene: import('./game-scene').GameScene | null = null;
   private readonly mapWorkerClient = new MapWorkerClient();
+  private readonly router = inject(Router);
+  private readonly sessionRuntime = inject(WorldSessionRuntime);
+  private resolveSceneReady!: () => void;
+  private readonly sceneReadyPromise = new Promise<void>((resolve) => {
+    this.resolveSceneReady = resolve;
+  });
   private isDestroyed = false;
   mapConfig: MapConfig = normalizeMapConfig(DEFAULT_MAP_CONFIG);
-  isGenerating = true;
+  isGenerating = false;
   generationError: string | null = null;
-  overlayState: GenerationOverlayState = 'generating';
+  overlayState: GenerationOverlayState = 'hidden';
   generationProgress: GenerationProgressState = createInitialGenerationProgress();
   lastMapSummary: MapSummary | null = null;
+  private generatedMapData: AuthoritativeMapData | null = null;
+  private generatedMapConfig: MapConfig | null = null;
   isExploring = false;
   isDockOpen = true;
 
@@ -82,6 +118,14 @@ export class App implements AfterViewInit, OnDestroy {
     return Math.round(clamp(this.generationProgress.progress, 0, 1) * 100);
   }
 
+  get canAcceptWorld(): boolean {
+    return this.isExploring &&
+      this.overlayState === 'hidden' &&
+      this.lastMapSummary !== null &&
+      this.generatedMapData !== null &&
+      this.generatedMapConfig !== null;
+  }
+
   ngAfterViewInit(): void {
     void import('./game-scene')
       .then(({ GameScene }) => {
@@ -93,7 +137,7 @@ export class App implements AfterViewInit, OnDestroy {
           this.sceneFrame.nativeElement,
         );
         this.gameScene.setNavigationEnabled(false);
-        this.startGeneration();
+        this.resolveSceneReady();
       })
       .catch((error: unknown) => {
         if (this.isDestroyed) {
@@ -104,14 +148,19 @@ export class App implements AfterViewInit, OnDestroy {
         this.generationError =
           'The 3D map preview could not initialize in this browser. Try reloading or using a browser with WebGL support.';
         console.error('[scene] initialization failed', error);
+        this.resolveSceneReady();
       });
   }
 
-  generateWorld(): void {
+  async generateWorld(): Promise<void> {
     if (this.isGenerating) {
       return;
     }
 
+    await this.sceneReadyPromise;
+    if (this.isDestroyed || !this.gameScene) {
+      return;
+    }
     this.startGeneration();
   }
 
@@ -124,7 +173,10 @@ export class App implements AfterViewInit, OnDestroy {
     this.overlayState = 'generating';
     this.generationProgress = createInitialGenerationProgress();
     this.lastMapSummary = null;
-    this.mapWorkerClient.generate({ ...this.mapConfig }, {
+    this.generatedMapData = null;
+    this.generatedMapConfig = null;
+    const generationConfig = { ...this.mapConfig };
+    this.mapWorkerClient.generate(generationConfig, {
       onProgress: (message) => {
         this.generationProgress = {
           phase: message.phase,
@@ -141,6 +193,8 @@ export class App implements AfterViewInit, OnDestroy {
           detail: 'Preparing the starting view.',
         };
         this.lastMapSummary = message.summary;
+        this.generatedMapData = message.data;
+        this.generatedMapConfig = generationConfig;
         const initialReady = this.gameScene?.setMapData(
           message.data,
           message.summary.seaLevelSample,
@@ -210,6 +264,25 @@ export class App implements AfterViewInit, OnDestroy {
       this.isDockOpen = true;
       this.gameScene?.setNavigationEnabled(true);
     }
+  }
+
+  acceptWorld(): void {
+    if (!this.canAcceptWorld || !this.lastMapSummary || !this.generatedMapData || !this.generatedMapConfig) {
+      return;
+    }
+
+    const world = createWorldSession({
+      sessionId: createSessionId(),
+      mapConfig: this.generatedMapConfig,
+      mapSummary: this.lastMapSummary,
+      mapData: this.generatedMapData,
+    });
+    this.sessionRuntime.setActiveWorld(world);
+    void this.router.navigate(['/world'], { queryParams: getRuntimeQueryParams() });
+  }
+
+  returnToStart(): void {
+    void this.router.navigate(['/'], { queryParams: getRuntimeQueryParams() });
   }
 
   isMilestoneComplete(index: number): boolean {
@@ -366,4 +439,11 @@ function getHeightRange(heights: Uint16Array): { minimum: number; maximum: numbe
     maximum = Math.max(maximum, height);
   }
   return { minimum, maximum };
+}
+
+function createSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `world-session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }

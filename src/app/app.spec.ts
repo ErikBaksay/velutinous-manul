@@ -1,6 +1,8 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import {
   App,
+  WorldWorkshop,
   formatGenerationDuration,
   formatGenerationMemory,
   getGenerationMilestoneIndex,
@@ -12,7 +14,8 @@ import { GenerationPhase } from './map/map-types';
 describe('App', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [App],
+      imports: [App, WorldWorkshop],
+      providers: [provideRouter([])],
     }).compileComponents();
   });
 
@@ -22,11 +25,20 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render the scene canvas', () => {
+  it('keeps the application shell free of a startup scene', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('canvas')).toBeTruthy();
+    expect(compiled.querySelector('router-outlet')).toBeTruthy();
+    expect(compiled.querySelector('canvas')).toBeNull();
+  });
+
+  it('does not begin world generation when the workshop opens', () => {
+    const fixture = TestBed.createComponent(WorldWorkshop);
+    const workshop = fixture.componentInstance;
+
+    expect(workshop.isGenerating).toBe(false);
+    expect(workshop.overlayState).toBe('hidden');
   });
 
   it('maps every worker phase into the intended player-facing milestone', () => {
@@ -58,7 +70,7 @@ describe('App', () => {
   });
 
   it('dismisses completion and error overlays through their recovery actions', () => {
-    const app = TestBed.createComponent(App).componentInstance;
+    const app = TestBed.createComponent(WorldWorkshop).componentInstance;
 
     app.overlayState = 'complete';
     app.exploreMap();

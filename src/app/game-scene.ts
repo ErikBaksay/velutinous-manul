@@ -16,6 +16,7 @@ import { ChunkDebugVisualizer } from './chunk-debug-visualizer';
 import { ChunkStreamingManager } from './chunk-streaming-manager';
 import { RenderDiagnostics, RenderPassTimings } from './render-diagnostics';
 import { getRenderQualitySettings, RenderQualitySettings } from './render-quality';
+import { getRuntimeQueryParam } from './runtime-query';
 import { VisualAssetRegistry } from './visual-asset-registry';
 
 const CAMERA_ORBIT_RADIUS = Math.sqrt(90 ** 2 + 90 ** 2 + 90 ** 2);
@@ -338,7 +339,7 @@ function instrumentPostProcessingPass(
 function instrumentShadowPass(renderer: THREE.WebGLRenderer, timings: RenderPassTimings): void {
   const shadowMap = renderer.shadowMap;
   const originalRender = shadowMap.render.bind(shadowMap);
-  shadowMap.render = ((shadowsArray, scene, camera) => {
+  shadowMap.render = ((shadowsArray: THREE.Light[], scene: THREE.Scene, camera: THREE.Camera) => {
     const startedAt = performance.now();
     try {
       originalRender(shadowsArray, scene, camera);
@@ -390,6 +391,5 @@ function createMapCorners(): readonly THREE.Vector3[] {
 }
 
 function isChunkDebugEnabled(): boolean {
-  return typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('debug') === 'chunks';
+  return getRuntimeQueryParam('debug') === 'chunks';
 }
