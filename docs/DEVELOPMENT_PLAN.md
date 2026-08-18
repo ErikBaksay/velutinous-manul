@@ -10,9 +10,9 @@ Every implementation milestone is small enough to run and manually test. Work pa
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
 - **Current development stage:** Stage 1 — browser and 3D foundation, Map Generation v1 Gate 6.3 approved for map creation and preview; Milestones 2–6 are implemented and manually approved.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placeholder mine placement, removal, and save/reload.
-- **Current task:** Prepare the Milestone 7 mine blueprint and asset contract.
-- **Next planned work:** Review a supplied mine blueprint, then lock the model contract before asset creation.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placeholder mine placement, removal, and save/reload; Milestone 7 classical shaft-house asset contract; Milestone 8 authored Blender LOD0/LOD1 and runtime integration pending manual approval.
+- **Current task:** Manually review the rebuilt 15×6 classical shaft-house mine in the world session.
+- **Next planned work:** Address manual-review feedback or record Milestone 8 approval; do not begin resource extraction or another milestone without approval.
 - **Deferred systems:** Production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -248,13 +248,13 @@ Each milestone below is intentionally small and receives its own automated check
 
 **Exit condition:** The user can place and remove a placeholder mine, save it, reload it, and find it in the same location.
 
-**Implementation status:** Complete and manually approved. Added terrain-mesh raycast selection, Select and Mine tools, a data-driven 2×2 strict-land placeholder mine, valid/invalid preview feedback, multiple placement instances, removal, and red primitive visuals. Existing schema-version-2 gameplay state remains unchanged, including unknown-definition preservation.
+**Implementation status:** Complete and manually approved. Added terrain-mesh raycast selection, Select and Mine tools, an initially 2×2 strict-land placeholder mine (subsequently enlarged to 7×3 for the authored asset), valid/invalid preview feedback, multiple placement instances, removal, and red primitive visuals. Existing schema-version-2 gameplay state remains unchanged, including unknown-definition preservation.
 
 ### Milestone 6 decisions and verification — 2026-08-13
 
 - **Selection surface:** Raycast only currently attached terrain chunks and convert the hit x/z position through the existing grid-coordinate utilities. Navigation-plane fallback was rejected because construction selection should reflect the rendered terrain and should not silently select during a streaming gap.
 - **Construction interaction:** Use a Select/Mine tool palette. Mine mode previews on terrain hover and places on a valid click; Cancel returns to Select. Rotation controls, roads, production, economy, vehicles, and resource binding remain deferred.
-- **Placeholder scope:** Support multiple generic `velutinous-manul-placeholder-mine` instances with deterministic IDs and no deposit/resource association. The definition uses a 2×2 footprint and strict-land policy (`maxSlope: 0.2`).
+- **Placeholder scope:** Support multiple generic `velutinous-manul-placeholder-mine` instances with deterministic IDs and no deposit/resource association. The definition now uses a 7×3 footprint and strict-land policy (`maxSlope: 0.2`).
 - **Visuals:** Use translucent bordered cell tiles for selection and green/red footprint previews. Placed mines use simple opaque red boxes; the final mine model remains deferred to Milestone 8.
 - **Save/reload synchronization:** Persisted `placedBuildings` was present after reload, but async world-save completion could leave the scene visual set stale. Construction occupancy and visuals now resynchronize whenever the active world is replaced during initial load, manual save, autosave, placement, or removal.
 - **Manual verification:** Confirmed placement, multiple-instance behavior, removal, manual save, leave/reload, and same-location mine reconstruction in the local browser. No files were staged, committed, or pushed.
@@ -262,24 +262,82 @@ Each milestone below is intentionally small and receives its own automated check
 ### Milestone 7 preparation — 2026-08-13
 
 - The existing environment asset contract is available in `art/environment/README.md`: one world unit per terrain cell, Y-up, origin at ground contact, applied transforms, simple opaque materials, stable names, and paired LOD0/LOD1 geometry.
-- No mine blueprint, mine source scene, or mine asset specification is currently present in the workspace. Milestone 7 remains pending that input; no mine geometry or new asset contract is being invented ahead of review.
+- At the time of this preparation note, no mine blueprint, mine source scene, or mine asset specification was present in the workspace. A classical shaft-house blueprint was subsequently supplied in chat on 2026-08-18; its printed dimensions are approximate and potentially incorrect, so it is general visual guidance rather than an exact drafting source.
+- No mine source scene or mine runtime asset has been added to the repository. Mine geometry remains deferred until the Milestone 7 contract is approved.
 
 ### Milestone 7 — Mine blueprint and asset contract
 
-- Review the supplied mine blueprint.
-- Lock the grid footprint, ground-contact origin, orientation rules, terrain constraints, and relationship to resource deposits.
-- Confirm the model scale, naming, material, and LOD requirements against the existing environment asset conventions.
+- Review the supplied mine blueprint as approximate guidance for its silhouette, composition, architectural vocabulary, and material mood. Preserve the west shaft tower/headframe, long central hall, south portico, east utility/loading end, twin chimneys, dark roof, and main solar array; regularize contradictory counts of small roof and facade details.
+- Preserve the approved construction and save contracts: definition ID `velutinous-manul-placeholder-mine`, 7×3 footprint, rotation `0`, integer minimum-cell save origin, schema version 2, deterministic instance IDs, unknown-definition preservation, and the existing terrain policy (`requiresBuildable=true`, `allowWater=false`, `allowImpassable=false`, `maxSlope=0.2`).
+- Use the runtime's existing visual anchor: the horizontal center of the 7×3 footprint at the average elevation of its cells. The asset's joined LOD mesh therefore needs a centered X/Z origin and ground contact at local Y=0; the saved minimum-cell origin does not become the model pivot.
+- Keep the model rigid and within the logical 7×3 footprint. Use a shallow opaque foundation/plinth to tolerate the already-permitted slope rather than deforming the asset to terrain.
+- Treat all printed blueprint dimensions as non-binding. Select the final uniform game scale from an in-engine blockout, then reuse exactly the same ground alignment and bounds for LOD0 and LOD1.
+- Keep Milestone 7 documentation-only. Do not add mine geometry, resource placement enforcement, a new save field, or runtime registry behavior before the decisions below are approved.
+
+#### Milestone 7 repository findings — 2026-08-18
+
+- The repository was clean on `main` when this plan was reconciled; no staged or unstaged handoff changes remained to preserve.
+- `GameScene.setPlacedBuildings()` currently centers the placeholder from its rotated footprint, averages terrain elevation across the footprint, and renders a disposable red box. This is the Milestone 8 visual replacement seam.
+- `VisualAssetRegistry` currently recognizes environment prototypes by stable `_lod0`/`_lod1` mesh names, bakes authored transforms into geometry, and supports one material or a material array per joined mesh.
+- The current deterministic Blender script exports one self-contained `public/assets/environment/environment.glb` plus `manifest.json`. It creates LOD1 with a generic decimate modifier; the mine will need an authored/silhouette-aware LOD1 even if it shares this export.
+- The registry has no building family and no grouped-scene building API. A composed multi-node mine would therefore require more runtime architecture than a joined mesh per LOD.
+- Blender 5.1.1 was found in the user's portable application directory and executed directly. The deterministic build, `.blend` save, GLB export, re-import validation, and review render all completed in the current environment.
+
+#### Milestone 7 approved design decisions — 2026-08-18
+
+The user directed the complete plan to be implemented in one pass after the recommended directions were presented. The implementation therefore uses the recommended direction for each decision below.
+
+**Decision 7A — Game-scale massing**
+
+1. **Selected — Footprint-filling, blueprint-faithful:** Enlarge the construction footprint to 7×3 so the long axis, broad headframe braces, hall depth, and tower can retain the proposal's proportions with a small boundary margin.
+2. **Compact industrial landmark:** Rejected after visual review because the 2×2 occupancy made the building read undersized and compressed compared with the proposal.
+3. **Tower-emphasized interpretation:** Keep the plan envelope moderate but increase the tower/headframe's relative height during blockout. Improves distant recognition, but intentionally departs from the approximate reference proportions.
+
+The compact and tower-emphasized alternatives were rejected because the selected model needed to stay as close to the supplied composition as the fixed footprint permits.
+
+**Decision 7B — Fixed rotation-0 orientation**
+
+1. **Selected — Proposal-facing presentation:** The front portico faces south (`-Z`); the authored X composition is mirrored so the tower reads on the left and the chimneys on the right from the default front three-quarter camera.
+2. **Front-facing north:** Keep the tower west but mirror the facade so the portico faces `+Z`. May suit a preferred camera approach, but contradicts the blueprint's front/south label.
+3. **Quarter-turned presentation:** Put the long axis on Z and choose an east- or west-facing portico. May frame better from some cameras, but makes rotation 0 diverge most strongly from the supplied plan.
+
+The mirrored and quarter-turned alternatives were rejected because the blueprint's labeled compass provides an unambiguous rotation-0 contract.
+
+**Decision 7C — Future resource-deposit relationship**
+
+1. **Selected — Named shaft locator, deferred enforcement:** Include a stable semantic anchor under the west shaft in the authoring contract, but leave Milestone 6 placement validity and saved state unchanged until resource binding is implemented. Preserves architecture while giving the future system an explicit extraction point.
+2. **Any deposit under the footprint:** Document a future rule that accepts a compatible deposit beneath any of the four occupied cells. Simpler gameplay validation, but less faithful to the visible shaft location.
+3. **Defer the relationship entirely:** Add no locator or rule yet. Minimizes Milestone 7 scope, but risks requiring an asset-origin or mesh-contract change when resource extraction arrives.
+
+The any-cell and no-locator alternatives were rejected because the visible shaft supplies a natural future extraction point without requiring a current save or placement change.
+
+**Decision 7D — Runtime asset packaging**
+
+1. **Selected — Joined mine mesh per LOD in the existing GLB:** Export `mine_shaft_house_lod0` and `mine_shaft_house_lod1` with stable material slots, and extend the current registry with a building family. Smallest change to the proven pipeline and compatible with the current prototype representation.
+2. **Separate building GLB and registry:** Create a dedicated building manifest/loader. Cleaner long-term separation from streamed environment scatter, but introduces a second asset pipeline and more Milestone 8 architecture.
+3. **Composed multi-node mine scene:** Preserve modules as separately named runtime nodes and add grouped-scene loading. Offers maximum per-module flexibility, but is unnecessary for a static first mine and requires the largest loader/rendering change.
+
+The separate pipeline and composed-scene alternatives were rejected because the first static mine can use the existing manifest and prototype registry. The loader now merges a named multi-material glTF group into one runtime prototype while retaining material groups.
+
+#### Milestone 7 execution and approval gate
+
+1. [x] User selected the recommended Decisions 7A–7D by directing the presented plan to be implemented completely.
+2. [x] Record selected and rejected directions, stable names, material slots, bounds, and LOD budgets here and in `art/environment/README.md`.
+3. [x] Preserve the placement/save architecture and validate the contract through the deterministic Blender build and focused checks.
 
 **Exit condition:** The mine model can be created without changing the placement or save architecture.
 
 ### Milestone 8 — First mine model integration
 
-- Create the low-poly mine asset.
-- Export and register it through the existing environment asset pipeline.
-- Replace the placeholder visual while preserving the same serialized building state.
-- Perform visual placement, camera-distance, save/reload, and removal checks.
+- **Step 8.1 — Approved blockout:** Add the major mine masses and final ground alignment to the deterministic Blender source. Export a joined `lod0` blockout, register it through the approved packaging direction, and tune it inside the enlarged 15×6 footprint. Run asset-name/bounds checks, focused TypeScript checks, and a placement manual test; then pause for approval.
+- **Step 8.2 — LOD0 form and materials:** Add the approved silhouette-defining architecture and simple opaque materials. Prefer geometry for the headframe, portico, roofline, loading end, and chimneys; use restrained surface treatment for repeated facade and solar-panel detail. Run triangle/material/bounds checks and compare six review views plus gameplay distance; then pause for approval.
+- **Step 8.3 — Authored LOD1:** Create a silhouette-aware LOD1 with the exact LOD0 pivot, bounds contract, and material names. Validate LOD switching and distant readability; then pause for approval.
+- **Step 8.4 — Final runtime replacement:** Replace only the red placeholder visual at the existing `GameScene.setPlacedBuildings()` seam. Preserve construction definitions, placement rules, occupancy, IDs, schema version, save encoding, and unknown-definition behavior. Run the focused construction/save/terrain tests and both TypeScript no-emit checks; manually test placement, invalid preview, multiple mines, removal, manual save, leave/reload, and reconstruction; then pause for approval.
+- **Step 8.5 — Documentation closeout:** Record final asset names, actual approved bounds and triangle counts, build command, checks, and manual approval. Do not begin resource production or another milestone without a new approval.
 
 **Exit condition:** The first mine is a persistent, placeable building in the world, but extraction simulation remains a later milestone.
+
+**Implementation status:** Complete pending manual approval. Blender 5.1.1 generated the source `.blend`, self-contained GLB, `mine_shaft_house_lod0` (9,554 triangles), `mine_shaft_house_lod1` (7,656 triangles), eight stable opaque materials, and a tower-derived `mine_resource_anchor`. The visual registry recognizes the building family and reconstructs joined multi-material prototypes from glTF groups. `GameScene` replaces the red box with cloned authored LOD meshes and switches LOD by orthographic visible height while retaining the red fallback for asset-load failure. The mine now fills a 15×6 footprint and follows the proposal with a long extraction hall, tower-adjacent columned entrance, five uninterrupted window bays, paired front truck gates, four rear machinery gates, an open masonry winding stage, recessed twin-rim wheel, squared structural braces, expanded solar arrays, five roof vents, and twin chimneys. Placement, save schema, deterministic IDs, unknown-definition behavior, and terrain rules otherwise remain unchanged.
 
 ## Completed first implementation definition
 

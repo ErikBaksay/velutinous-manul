@@ -25,6 +25,7 @@ import {
   getRotatedFootprintSize,
   getConstructionTerrainSample,
   terrainHitPointToCellCoordinate,
+  VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
 } from './construction';
 import type { PlacedBuildingState } from './save/save-contract';
 import { clientPointToNormalizedDeviceCoordinate } from './construction/selection';
@@ -50,6 +51,8 @@ const CAMERA_MINIMUM_ELEVATION = 40;
 const CAMERA_MAXIMUM_ELEVATION = 88;
 const MAP_BACKDROP_SIZE = Math.max(MAP_WIDTH, MAP_HEIGHT) * 3;
 const MAP_DIMENSIONS = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
+const MINE_ASSET_ID = 'mine_shaft_house_lod0';
+const MINE_LOD_VISIBLE_HEIGHT = 58;
 
 export class GameScene {
   private readonly scene = new THREE.Scene();
@@ -289,20 +292,28 @@ export class GameScene {
       }
       baseElevation /= size.width * size.height;
 
-      const height = 2.8;
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(size.width * 0.82, height, size.height * 0.82),
-        new THREE.MeshStandardMaterial({
-          color: 0xb63c3c,
-          roughness: 0.78,
-          metalness: 0.05,
-        }),
-      );
-      mesh.name = `construction-building-${building.id}`;
-      mesh.position.set(center.x, baseElevation + height / 2, center.z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.placedBuildingVisuals.add(mesh);
+      if (building.definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID &&
+          this.visualAssetRegistry.has(MINE_ASSET_ID)) {
+        const mine = createMineVisual(this.visualAssetRegistry, building.id);
+        mine.position.set(center.x, baseElevation, center.z);
+        mine.rotation.y = -building.rotationQuarterTurns * Math.PI / 2;
+        this.placedBuildingVisuals.add(mine);
+      } else {
+        const height = 2.8;
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(size.width * 0.82, height, size.height * 0.82),
+          new THREE.MeshStandardMaterial({
+            color: 0xb63c3c,
+            roughness: 0.78,
+            metalness: 0.05,
+          }),
+        );
+        mesh.name = `construction-building-${building.id}`;
+        mesh.position.set(center.x, baseElevation + height / 2, center.z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.placedBuildingVisuals.add(mesh);
+      }
     }
   }
 
@@ -338,6 +349,10 @@ export class GameScene {
     this.passTimings.shadowPassCpuMs = 0;
     this.passTimings.gtaoPassCpuMs = 0;
     this.cameraController.update(this.frameTimeMs / 1_000);
+    updateMineVisualLods(
+      this.placedBuildingVisuals,
+      this.cameraController.getDebugState().visibleViewHeight > MINE_LOD_VISIBLE_HEIGHT ? 1 : 0,
+    );
     this.updateCameraClipping();
     this.chunkStreamingManager.update(this.camera, this.cameraController.getNavigationState());
     const currentSelection = this.chunkStreamingManager.getCurrentSelection();
@@ -629,6 +644,42 @@ function disposeObjectChildren(group: THREE.Group): void {
     });
     child.removeFromParent();
   }
+}
+
+function createMineVisual(
+  assets: VisualAssetRegistry,
+  buildingId: string,
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `construction-building-${buildingId}`;
+  for (const lod of [0, 1] as const) {
+    const asset = assets.getLodAsset(MINE_ASSET_ID, lod);
+    const mesh = new THREE.Mesh(
+      asset.geometry.clone(),
+      Array.isArray(asset.material)
+        ? asset.material.map((material) => material.clone())
+        : asset.material.clone(),
+    );
+    mesh.name = `${group.name}-lod${lod}`;
+    mesh.userData['mineLod'] = lod;
+    mesh.visible = lod === 0;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  return group;
+}
+
+function updateMineVisualLods(group: THREE.Group, activeLod: 0 | 1): void {
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) {
+      return;
+    }
+    const mineLod = object.userData['mineLod'];
+    if (mineLod === 0 || mineLod === 1) {
+      object.visible = mineLod === activeLod;
+    }
+  });
 }
 
 function createMapCorners(): readonly THREE.Vector3[] {

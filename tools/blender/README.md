@@ -10,8 +10,14 @@ blender --background --python tools/blender/build_environment_assets.py
 ```
 
 The script writes `public/assets/environment/environment.glb`. The generated
-file is self-contained and does not reference external textures or models.
+file is self-contained and does not reference external textures or models. It
+also writes the reproducible source scene to `art/environment/environment.blend`.
 
 The source scene can be opened and edited in Blender before exporting. Keep
 future houses, factories, roads, bridges, and vehicles within the same naming,
 scale, origin, and material conventions described in `art/environment/README.md`.
+
+The script validates the classical shaft-house mine's 15×6 bounds, facade-opening
+clearances, generated tower resource anchor, stable LOD names, and triangle ceilings before export. Blender
+5.1.1 was used for the first mine export. A portable Blender install may be
+invoked by its absolute executable path when `blender` is not on `PATH`.

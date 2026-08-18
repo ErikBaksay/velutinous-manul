@@ -9,8 +9,8 @@ export const VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID =
 export const VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION: BuildingDefinition = Object.freeze({
   id: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
   footprint: Object.freeze({
-    width: 2,
-    height: 2,
+    width: 15,
+    height: 6,
   }),
   placement: Object.freeze({
     requiresBuildable: true,

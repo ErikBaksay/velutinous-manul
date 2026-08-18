@@ -72,7 +72,7 @@ import { WorldSessionRuntime } from './session-runtime';
             >Mine</button>
           </div>
           @if (activeTool === 'mine') {
-            <p class="tool-note">Hover over land to preview a 2×2 placeholder mine.</p>
+            <p class="tool-note">Hover over land to preview a large 15×6 shaft-house mine.</p>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
           }
           @if (placementMessage) {
@@ -484,7 +484,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   activateMineTool(): void {
     this.activeTool = 'mine';
-    this.placementMessage = 'Move over terrain to preview a placeholder mine.';
+    this.placementMessage = 'Move over terrain to preview the shaft-house mine.';
     if (this.selectedCell) {
       this.updatePlacementPreview(this.selectedCell);
     }
@@ -520,7 +520,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.updatePlacedBuildings(this.world.gameplay.placedBuildings.filter((building) =>
       building.id !== selectedMine.id,
     ));
-    this.placementMessage = 'Removed the selected placeholder mine.';
+    this.placementMessage = 'Removed the selected mine.';
     if (this.activeTool === 'mine' && this.selectedCell) {
       this.updatePlacementPreview(this.selectedCell);
     }
@@ -550,7 +550,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       return;
     }
     this.placementPreview = null;
-    this.placementMessage = 'Move over terrain to preview a placeholder mine.';
+    this.placementMessage = 'Move over terrain to preview the shaft-house mine.';
     this.gameScene?.setPlacementPreview(null);
   }
 
@@ -558,7 +558,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     const validation = this.validatePlaceholderMine(origin);
     this.placementPreview = validation;
     this.placementMessage = validation.valid
-      ? 'Valid placement — click to place the placeholder mine.'
+      ? 'Valid placement — click to place the shaft-house mine.'
       : `Cannot place mine: ${getPlacementFailureMessage(validation)}`;
     this.gameScene?.setPlacementPreview(validation);
   }
@@ -583,7 +583,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     };
     this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building]);
     this.selectCell(origin);
-    this.placementMessage = `Placed placeholder mine at ${origin.x}, ${origin.y}.`;
+    this.placementMessage = `Placed shaft-house mine at ${origin.x}, ${origin.y}.`;
     this.placementPreview = null;
     this.gameScene?.setPlacementPreview(null);
   }

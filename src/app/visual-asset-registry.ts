@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export type VisualAssetFamily = 'canopy' | 'understory' | 'rock' | 'shore' | 'deposit';
+export type VisualAssetFamily = 'canopy' | 'understory' | 'rock' | 'shore' | 'deposit' | 'building';
 
 export interface AssetPrototype {
   readonly id: string;
@@ -29,6 +29,7 @@ const ASSET_FAMILIES: Readonly<Record<string, VisualAssetFamily>> = Object.freez
   ore_iron: 'deposit',
   ore_copper: 'deposit',
   ore_stone: 'deposit',
+  mine_shaft_house: 'building',
 });
 
 const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
@@ -47,7 +48,12 @@ const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
   ore_iron_lod0: 0x9b5b4b,
   ore_copper_lod0: 0x4e9b82,
   ore_stone_lod0: 0xb2afa0,
+  mine_shaft_house_lod0: 0x928b7b,
 });
+
+export function getRegisteredVisualAssetFamily(baseId: string): VisualAssetFamily | undefined {
+  return ASSET_FAMILIES[baseId];
+}
 
 export class VisualAssetRegistry {
   private readonly prototypes = new Map<string, AssetPrototype>();
@@ -108,7 +114,9 @@ export class VisualAssetRegistry {
           ? 0x77766b
           : family === 'shore'
             ? 0xb3a579
-            : 0x9a6850;
+            : family === 'building'
+              ? 0x928b7b
+              : 0x9a6850;
     const material = new THREE.MeshStandardMaterial({
       color,
       roughness: family === 'rock' || family === 'deposit' ? 0.96 : 0.9,
@@ -164,32 +172,16 @@ export class VisualAssetRegistry {
         this.loadedRoots.push(root);
         root.updateMatrixWorld(true);
         root.traverse((object) => {
-          if (!(object instanceof THREE.Mesh)) {
-            return;
-          }
           const id = object.name;
           const baseId = getBaseAssetId(id);
           const family = ASSET_FAMILIES[baseId];
           if (!family || this.prototypes.has(id)) {
             return;
           }
-          const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
-          const materials = sourceMaterials.map((sourceMaterial) => {
-            const material = sourceMaterial instanceof THREE.MeshStandardMaterial
-              ? sourceMaterial.clone()
-              : new THREE.MeshStandardMaterial({ color: MATERIAL_COLORS[id] ?? 0x778877 });
-            material.roughness = 0.88;
-            material.metalness = 0;
-            return material;
-          });
-          this.prototypes.set(id, {
-            id,
-            baseId,
-            family,
-            lod: getAssetLod(id),
-            geometry: prepareAssetGeometry(object.geometry, object.matrixWorld),
-            material: materials.length === 1 ? materials[0] : materials,
-          });
+          const prototype = createAuthoredAssetPrototype(object, id, baseId, family);
+          if (prototype) {
+            this.prototypes.set(id, prototype);
+          }
         });
         if (this.prototypes.size === 0) {
           reject(new Error('Environment GLB contains no recognized asset IDs.'));
@@ -284,6 +276,83 @@ export class VisualAssetRegistry {
     const requestedId = `${baseId}_lod${lod}`;
     return this.prototypes.get(requestedId) ?? this.get(`${baseId}_lod0`);
   }
+}
+
+function createAuthoredAssetPrototype(
+  object: THREE.Object3D,
+  id: string,
+  baseId: string,
+  family: VisualAssetFamily,
+): AssetPrototype | null {
+  if (object instanceof THREE.Mesh) {
+    const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    const materials = sourceMaterials.map((sourceMaterial) => cloneAuthoredMaterial(sourceMaterial, id));
+    return {
+      id,
+      baseId,
+      family,
+      lod: getAssetLod(id),
+      geometry: prepareAssetGeometry(object.geometry, object.matrixWorld),
+      material: materials.length === 1 ? materials[0] : materials,
+    };
+  }
+
+  // Composite GLTF nodes were introduced for authored buildings. The legacy
+  // nature GLB also contains composite tree nodes, but those nodes use the
+  // authoring scene's horizontal axis for canopy stacking. Before buildings
+  // were supported they were intentionally ignored and the upright procedural
+  // tree kit supplied the runtime geometry. Keep that compatibility contract
+  // instead of allowing malformed tree groups to replace the established kit.
+  if (family !== 'building') {
+    return null;
+  }
+
+  const geometries: THREE.BufferGeometry[] = [];
+  const materials: THREE.Material[] = [];
+  object.traverse((descendant) => {
+    if (!(descendant instanceof THREE.Mesh)) {
+      return;
+    }
+    const sourceMaterials = Array.isArray(descendant.material)
+      ? descendant.material
+      : [descendant.material];
+    if (sourceMaterials.length !== 1) {
+      throw new Error(`Authored asset group "${id}" contains a nested multi-material mesh.`);
+    }
+    const geometry = descendant.geometry.clone();
+    geometry.applyMatrix4(descendant.matrixWorld);
+    geometries.push(geometry);
+    materials.push(cloneAuthoredMaterial(sourceMaterials[0], id));
+  });
+  if (geometries.length === 0) {
+    return null;
+  }
+  const merged = mergeGeometries(geometries, true);
+  geometries.forEach((geometry) => geometry.dispose());
+  if (!merged) {
+    materials.forEach((material) => material.dispose());
+    throw new Error(`Unable to merge authored asset group "${id}".`);
+  }
+  const geometry = prepareAssetGeometry(merged);
+  merged.dispose();
+  return {
+    id,
+    baseId,
+    family,
+    lod: getAssetLod(id),
+    geometry,
+    material: materials.length === 1 ? materials[0] : materials,
+  };
+}
+
+function cloneAuthoredMaterial(source: THREE.Material, id: string): THREE.Material {
+  const material = source instanceof THREE.MeshStandardMaterial
+    ? source.clone()
+    : new THREE.MeshStandardMaterial({ color: MATERIAL_COLORS[id] ?? 0x778877 });
+  if (material instanceof THREE.MeshStandardMaterial) {
+    material.roughness = Math.max(material.roughness, 0.62);
+  }
+  return material;
 }
 
 function getBaseAssetId(id: string): string {

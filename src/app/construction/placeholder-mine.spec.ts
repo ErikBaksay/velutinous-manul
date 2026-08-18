@@ -5,10 +5,10 @@ import {
 } from './placeholder-mine';
 
 describe('Velutinous Manul placeholder mine definition', () => {
-  it('defines the configurable 2×2 strict-land placeholder mine', () => {
+  it('defines the configurable 15×6 strict-land mine', () => {
     expect(VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION).toEqual({
       id: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
-      footprint: { width: 2, height: 2 },
+      footprint: { width: 15, height: 6 },
       placement: {
         requiresBuildable: true,
         allowWater: false,
