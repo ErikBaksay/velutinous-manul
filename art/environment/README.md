@@ -59,3 +59,26 @@ LOD0 is 9,554 triangles and LOD1 is 7,656 triangles. LOD1 is authored separately
 to preserve the open tower, dominant winding wheel, timber braces, long roofline,
 columned entrance, six machinery entrances, and twin-chimney silhouette instead of
 relying on generic decimation.
+
+## Arcaded warehouse contract
+
+The first destination/logistics building shares the deterministic environment
+GLB and is exported as two joined, multi-material meshes:
+
+- `warehouse_lod0`
+- `warehouse_lod1`
+
+The warehouse uses a 15×6 footprint. Its horizontal origin is the footprint
+center and local Z=0 is ground contact before glTF axis conversion. Runtime
+negative Z is the loading facade. Both LODs stay inside authored bounds X
+`-7.460..7.488`, Y `-2.900..2.900`, and Z `0..4.271`.
+
+The defining forms are six unobstructed recessed vehicle bays beneath a continuous
+loading canopy, ten upper front arches, twelve rear service arches, a classical
+end receiving pavilion with a large arched door, a rear service door, a repeated
+masonry bay rhythm, a broad solar field, three roof vents, and a marked loading apron. Vehicles,
+roads, inventories, and physical cargo remain separate gameplay work.
+
+LOD0 is 7,699 triangles and LOD1 is 5,402 triangles. LOD1 is authored
+separately so the canopy, loading rhythm, end pediment, roof field, and vents
+retain their silhouettes.

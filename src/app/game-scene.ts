@@ -26,6 +26,7 @@ import {
   getConstructionTerrainSample,
   terrainHitPointToCellCoordinate,
   VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+  VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
 import type { PlacedBuildingState } from './save/save-contract';
 import { clientPointToNormalizedDeviceCoordinate } from './construction/selection';
@@ -39,6 +40,8 @@ export interface GameSceneCellInteractionCallbacks {
 export interface GameScenePlacementPreview {
   readonly occupiedCells: readonly CellCoordinate[];
   readonly valid: boolean;
+  readonly definitionId: string;
+  readonly rotationQuarterTurns: 0 | 1 | 2 | 3;
 }
 
 const CAMERA_ORBIT_RADIUS = Math.sqrt(90 ** 2 + 90 ** 2 + 90 ** 2);
@@ -52,7 +55,8 @@ const CAMERA_MAXIMUM_ELEVATION = 88;
 const MAP_BACKDROP_SIZE = Math.max(MAP_WIDTH, MAP_HEIGHT) * 3;
 const MAP_DIMENSIONS = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
 const MINE_ASSET_ID = 'mine_shaft_house_lod0';
-const MINE_LOD_VISIBLE_HEIGHT = 58;
+const WAREHOUSE_ASSET_ID = 'warehouse_lod0';
+const BUILDING_LOD_VISIBLE_HEIGHT = 58;
 
 export class GameScene {
   private readonly scene = new THREE.Scene();
@@ -72,6 +76,7 @@ export class GameScene {
   private readonly pointer = new THREE.Vector2();
   private readonly selectedCellVisual = createSelectedCellVisual();
   private readonly placementPreviewVisual = createPlacementPreviewVisual();
+  private readonly placementPreviewModelVisual = new THREE.Group();
   private readonly placedBuildingVisuals = new THREE.Group();
   private readonly onCanvasPointerMove = (event: PointerEvent): void => {
     const cell = this.getTerrainCellFromPointer(event.clientX, event.clientY);
@@ -135,6 +140,8 @@ export class GameScene {
     this.scene.add(this.mapBackdrop);
     this.scene.add(this.selectedCellVisual);
     this.scene.add(this.placementPreviewVisual);
+    this.placementPreviewModelVisual.name = 'construction-placement-preview-model';
+    this.scene.add(this.placementPreviewModelVisual);
     this.scene.add(this.placedBuildingVisuals);
     this.canvas.addEventListener('pointermove', this.onCanvasPointerMove);
     this.canvas.addEventListener('click', this.onCanvasClick);
@@ -237,8 +244,10 @@ export class GameScene {
   }
 
   setPlacementPreview(preview: GameScenePlacementPreview | null): void {
+    disposeObjectChildren(this.placementPreviewModelVisual);
     if (!preview || !this.mapData) {
       this.placementPreviewVisual.visible = false;
+      this.placementPreviewModelVisual.visible = false;
       return;
     }
 
@@ -259,6 +268,37 @@ export class GameScene {
       setCellVisualColor(cellVisual, color, 0.36, 0.98);
     }
     this.placementPreviewVisual.visible = preview.occupiedCells.length > 0;
+
+    const assetId = getBuildingAssetId(preview.definitionId);
+    const validCells = preview.occupiedCells.filter((cell) =>
+      cell.x >= 0 && cell.x < MAP_WIDTH && cell.y >= 0 && cell.y < MAP_HEIGHT,
+    );
+    if (!assetId || validCells.length === 0 || !this.visualAssetRegistry.has(assetId)) {
+      this.placementPreviewModelVisual.visible = false;
+      return;
+    }
+    const minimumX = Math.min(...preview.occupiedCells.map((cell) => cell.x));
+    const maximumX = Math.max(...preview.occupiedCells.map((cell) => cell.x));
+    const minimumY = Math.min(...preview.occupiedCells.map((cell) => cell.y));
+    const maximumY = Math.max(...preview.occupiedCells.map((cell) => cell.y));
+    const center = cellToWorldCenter(
+      { x: (minimumX + maximumX) / 2, y: (minimumY + maximumY) / 2 },
+      MAP_DIMENSIONS,
+    );
+    const baseElevation = validCells.reduce((total, cell) =>
+      total + getConstructionTerrainSample(this.mapData!, MAP_DIMENSIONS, cell).elevationWorld,
+    0) / validCells.length;
+    const model = createAuthoredBuildingVisual(
+      this.visualAssetRegistry,
+      assetId,
+      'preview',
+      true,
+      preview.valid,
+    );
+    model.position.set(center.x, baseElevation + 0.04, center.z);
+    model.rotation.y = -preview.rotationQuarterTurns * Math.PI / 2;
+    this.placementPreviewModelVisual.add(model);
+    this.placementPreviewModelVisual.visible = true;
   }
 
   setPlacedBuildings(
@@ -292,12 +332,16 @@ export class GameScene {
       }
       baseElevation /= size.width * size.height;
 
-      if (building.definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID &&
-          this.visualAssetRegistry.has(MINE_ASSET_ID)) {
-        const mine = createMineVisual(this.visualAssetRegistry, building.id);
-        mine.position.set(center.x, baseElevation, center.z);
-        mine.rotation.y = -building.rotationQuarterTurns * Math.PI / 2;
-        this.placedBuildingVisuals.add(mine);
+      const assetId = getBuildingAssetId(building.definitionId);
+      if (assetId && this.visualAssetRegistry.has(assetId)) {
+        const authoredBuilding = createAuthoredBuildingVisual(
+          this.visualAssetRegistry,
+          assetId,
+          building.id,
+        );
+        authoredBuilding.position.set(center.x, baseElevation, center.z);
+        authoredBuilding.rotation.y = -building.rotationQuarterTurns * Math.PI / 2;
+        this.placedBuildingVisuals.add(authoredBuilding);
       } else {
         const height = 2.8;
         const mesh = new THREE.Mesh(
@@ -349,9 +393,9 @@ export class GameScene {
     this.passTimings.shadowPassCpuMs = 0;
     this.passTimings.gtaoPassCpuMs = 0;
     this.cameraController.update(this.frameTimeMs / 1_000);
-    updateMineVisualLods(
+    updateBuildingVisualLods(
       this.placedBuildingVisuals,
-      this.cameraController.getDebugState().visibleViewHeight > MINE_LOD_VISIBLE_HEIGHT ? 1 : 0,
+      this.cameraController.getDebugState().visibleViewHeight > BUILDING_LOD_VISIBLE_HEIGHT ? 1 : 0,
     );
     this.updateCameraClipping();
     this.chunkStreamingManager.update(this.camera, this.cameraController.getNavigationState());
@@ -646,40 +690,64 @@ function disposeObjectChildren(group: THREE.Group): void {
   }
 }
 
-function createMineVisual(
+function createAuthoredBuildingVisual(
   assets: VisualAssetRegistry,
+  assetId: string,
   buildingId: string,
+  preview = false,
+  valid = true,
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = `construction-building-${buildingId}`;
-  for (const lod of [0, 1] as const) {
-    const asset = assets.getLodAsset(MINE_ASSET_ID, lod);
+  for (const lod of preview ? [0] as const : [0, 1] as const) {
+    const asset = assets.getLodAsset(assetId, lod);
+    const materials = (Array.isArray(asset.material) ? asset.material : [asset.material])
+      .map((material) => {
+        const clone = material.clone();
+        if (preview) {
+          clone.transparent = true;
+          clone.opacity = 0.56;
+          clone.depthWrite = false;
+          if (clone instanceof THREE.MeshStandardMaterial) {
+            clone.color.lerp(new THREE.Color(valid ? 0x72d69a : 0xf07878), 0.34);
+          }
+        }
+        return clone;
+      });
     const mesh = new THREE.Mesh(
       asset.geometry.clone(),
-      Array.isArray(asset.material)
-        ? asset.material.map((material) => material.clone())
-        : asset.material.clone(),
+      Array.isArray(asset.material) ? materials : materials[0],
     );
     mesh.name = `${group.name}-lod${lod}`;
-    mesh.userData['mineLod'] = lod;
+    mesh.userData['buildingLod'] = lod;
     mesh.visible = lod === 0;
-    mesh.castShadow = true;
+    mesh.castShadow = !preview;
     mesh.receiveShadow = true;
     group.add(mesh);
   }
   return group;
 }
 
-function updateMineVisualLods(group: THREE.Group, activeLod: 0 | 1): void {
+function updateBuildingVisualLods(group: THREE.Group, activeLod: 0 | 1): void {
   group.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) {
       return;
     }
-    const mineLod = object.userData['mineLod'];
-    if (mineLod === 0 || mineLod === 1) {
-      object.visible = mineLod === activeLod;
+    const buildingLod = object.userData['buildingLod'];
+    if (buildingLod === 0 || buildingLod === 1) {
+      object.visible = buildingLod === activeLod;
     }
   });
+}
+
+function getBuildingAssetId(definitionId: string): string | null {
+  if (definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID) {
+    return MINE_ASSET_ID;
+  }
+  if (definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID) {
+    return WAREHOUSE_ASSET_ID;
+  }
+  return null;
 }
 
 function createMapCorners(): readonly THREE.Vector3[] {

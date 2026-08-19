@@ -34,6 +34,11 @@ PALETTE = {
     "mine_windows": (0.065, 0.052, 0.042, 1.0),
     "mine_timber": (0.24, 0.20, 0.16, 1.0),
     "mine_weathered_stone": (0.34, 0.33, 0.30, 1.0),
+    "warehouse_stone": (0.31, 0.30, 0.28, 1.0),
+    "warehouse_trim": (0.22, 0.22, 0.21, 1.0),
+    "warehouse_weathered_stone": (0.26, 0.255, 0.24, 1.0),
+    "warehouse_markings": (0.54, 0.52, 0.46, 1.0),
+    "warehouse_lamps": (0.78, 0.39, 0.10, 1.0),
 }
 
 NATURE_BASE_IDS = (
@@ -67,6 +72,10 @@ def material(name):
         principled.inputs["Roughness"].default_value = 0.62
     if name == "mine_timber":
         principled.inputs["Roughness"].default_value = 0.93
+    if name == "warehouse_lamps":
+        principled.inputs["Roughness"].default_value = 0.68
+        principled.inputs["Emission Color"].default_value = PALETTE[name]
+        principled.inputs["Emission Strength"].default_value = 1.6
     return mat
 
 
@@ -345,6 +354,35 @@ def side_arch_face(name, x, center_y, sill_z, width, height, mat, segments=8):
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
     return obj
+
+
+def side_arch_trim(parts, name, x, center_y, sill_z, width, height, mat, detailed):
+    """Create an archivolt and uprights in the Y/Z plane for an end facade."""
+    radius = width / 2
+    spring_z = sill_z + height - radius
+    trim_width = 0.09
+    segments = 10 if detailed else 7
+    vertices = []
+    faces = []
+    for index in range(segments + 1):
+        angle = index * math.pi / segments
+        vertices.extend([
+            (x, center_y + math.cos(angle) * (radius + trim_width), spring_z + math.sin(angle) * (radius + trim_width)),
+            (x, center_y + math.cos(angle) * radius, spring_z + math.sin(angle) * radius),
+        ])
+    for index in range(segments):
+        first = index * 2
+        faces.append((first, first + 1, first + 3, first + 2))
+    mesh = bpy.data.meshes.new(f"{name}_mesh")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.materials.append(mat)
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    parts.append(obj)
+    upright_height = spring_z - sill_z
+    for side, y in enumerate((center_y - radius - trim_width / 2, center_y + radius + trim_width / 2)):
+        parts.append(cube(f"{name}_upright_{side}", (0.04, trim_width, upright_height), (x, y, sill_z + upright_height / 2), mat))
+    parts.append(cube(f"{name}_sill", (0.04, width + 0.20, 0.08), (x, center_y, sill_z - 0.03), mat))
 
 
 def arch_trim(parts, name, center_x, y, sill_z, width, height, mat, detailed):
@@ -637,6 +675,178 @@ def mine_shaft_house(name, detailed):
     return asset
 
 
+WAREHOUSE_FOOTPRINT = (15.0, 6.0)
+WAREHOUSE_LOADING_BAYS = (-5.60, -3.65, -1.70, 0.25, 2.20, 4.15)
+WAREHOUSE_FRONT_ARCHES = (-6.25, -5.00, -3.75, -2.50, -1.25, 0.00, 1.25, 2.50, 3.75, 5.00)
+WAREHOUSE_REAR_ARCHES = tuple(-5.70 + index for index in range(12))
+WAREHOUSE_FRONT_DIVIDERS = (-6.55, -4.625, -2.675, -0.725, 1.225, 3.175, 5.125)
+
+
+def validate_warehouse_facade_layout():
+    """Protect truck clearances and the blueprint's explicit facade inventory."""
+    bay_width = 1.45
+    for divider in WAREHOUSE_FRONT_DIVIDERS:
+        for center in WAREHOUSE_LOADING_BAYS:
+            if abs(divider - center) < bay_width / 2 + 0.10:
+                raise RuntimeError(
+                    f"Warehouse facade divider {divider} intersects loading bay at {center}."
+                )
+    if len(WAREHOUSE_LOADING_BAYS) != 6:
+        raise RuntimeError("Warehouse must retain six clear loading bays.")
+    if len(WAREHOUSE_FRONT_ARCHES) != 10 or len(WAREHOUSE_REAR_ARCHES) != 12:
+        raise RuntimeError("Warehouse must retain its ten-front/twelve-rear arcade inventory.")
+
+
+def warehouse_window(parts, name, x, y, sill_z, front, detailed, width=0.54, height=0.76):
+    glass = material("mine_windows")
+    trim = material("warehouse_trim")
+    surface_y = y + (0.026 if front else -0.026)
+    parts.append(arch_face(f"{name}_glass", x, surface_y, sill_z, width, height, glass, 8 if detailed else 6))
+    arch_trim(parts, name, x, surface_y + (0.014 if front else -0.014), sill_z, width, height, trim, detailed)
+    if detailed:
+        parts.append(cube(f"{name}_mullion", (0.022, 0.035, height - width / 2), (x, surface_y, sill_z + (height - width / 2) / 2), trim))
+
+
+def warehouse_loading_bay(parts, name, x, y, detailed):
+    """Layer a deep portal over the wall so the sectional door reads recessed."""
+    doors = material("mine_metal_doors")
+    trim = material("warehouse_trim")
+    width = 1.45
+    height = 1.65
+    parts.append(cube(f"{name}_recess", (width + 0.18, 0.11, height + 0.18), (x, y + 0.035, 0.13 + height / 2), trim, 0.008))
+    parts.append(cube(f"{name}_door", (width, 0.035, height), (x, y + 0.098, 0.15 + height / 2), doors, 0.008))
+    for side, frame_x in enumerate((x - width / 2 - 0.09, x + width / 2 + 0.09)):
+        parts.append(cube(f"{name}_jamb_{side}", (0.18, 0.18, height + 0.26), (frame_x, y + 0.145, 0.13 + (height + 0.26) / 2), trim, 0.008))
+    parts.append(cube(f"{name}_lintel", (width + 0.36, 0.18, 0.18), (x, y + 0.145, 0.23 + height), trim, 0.008))
+    if detailed:
+        for panel in range(1, 5):
+            z = 0.15 + panel * height / 5
+            parts.append(cube(f"{name}_panel_{panel}", (width - 0.08, 0.025, 0.025), (x, y + 0.122, z), trim))
+        for seam_index, seam in enumerate((-width / 4, 0, width / 4)):
+            parts.append(cube(f"{name}_seam_{seam_index}", (0.018, 0.025, height - 0.06), (x + seam, y + 0.122, 0.15 + height / 2), trim))
+
+
+def warehouse_end_pediment(parts, name, x, detailed, stone, trim):
+    """Build a layered classical receiving end without creating a tower."""
+    face_x = x + 0.018
+    vertices = [
+        (face_x, -2.18, 3.47),
+        (face_x, 1.58, 3.47),
+        (face_x, -0.30, 4.14),
+    ]
+    mesh = bpy.data.meshes.new(f"{name}_pediment_mesh")
+    mesh.from_pydata(vertices, [], [(0, 1, 2)])
+    mesh.materials.append(stone)
+    pediment = bpy.data.objects.new(f"{name}_pediment", mesh)
+    bpy.context.collection.objects.link(pediment)
+    parts.append(pediment)
+    parts.extend([
+        beam_between(f"{name}_pediment_left", (face_x + 0.01, -2.28, 3.43), (face_x + 0.01, -0.30, 4.22), 0.12, 0.11, trim, 0.008),
+        beam_between(f"{name}_pediment_right", (face_x + 0.01, -0.30, 4.22), (face_x + 0.01, 1.68, 3.43), 0.12, 0.11, trim, 0.008),
+        cube(f"{name}_pediment_base", (0.12, 4.08, 0.16), (face_x + 0.01, -0.30, 3.43), trim, 0.008),
+        cube(f"{name}_entablature", (0.16, 4.24, 0.18), (face_x + 0.02, -0.30, 3.25), stone, 0.010),
+    ])
+    if detailed:
+        parts.append(cube(f"{name}_pediment_inset", (0.04, 1.55, 0.10), (face_x + 0.04, -0.30, 3.67), trim, 0.004))
+
+
+def warehouse_arcaded_depot(name, detailed):
+    light_stone = material("warehouse_stone")
+    dark_stone = material("warehouse_trim")
+    weathered_stone = material("warehouse_weathered_stone")
+    metal = material("mine_dark_metal")
+    doors = material("mine_metal_doors")
+    solar = material("mine_solar_panels")
+    lamps = material("warehouse_lamps")
+    markings = material("warehouse_markings")
+    parts = []
+    validate_warehouse_facade_layout()
+
+    # The enclosed hall occupies about 15x5 cells; the sixth row is an integral
+    # apron that gives the loading face the breadth shown in the blueprint.
+    parts.append(cube(f"{name}_foundation", (14.80, 5.80, 0.18), (0, 0, 0.09), dark_stone, 0.025))
+    parts.append(cube(f"{name}_loading_apron", (14.30, 1.10, 0.07), (-0.10, 2.35, 0.205), weathered_stone, 0.018))
+    parts.append(cube(f"{name}_hall", (14.40, 4.60, 3.06), (-0.10, -0.30, 1.70), light_stone, 0.025))
+    parts.append(cube(f"{name}_plinth", (14.52, 4.72, 0.38), (-0.10, -0.30, 0.38), weathered_stone, 0.020))
+    parts.append(cube(f"{name}_upper_band", (14.56, 4.74, 0.18), (-0.10, -0.30, 2.96), weathered_stone, 0.018))
+    parts.append(cube(f"{name}_cornice", (14.72, 4.88, 0.18), (-0.10, -0.30, 3.24), dark_stone, 0.025))
+
+    # A near-flat metal roof sits behind the continuous masonry cornice.
+    roof = hip_roof(f"{name}_roof", 14.64, 4.84, 3.31, 3.64, -0.10, -0.30, metal)
+    parts.append(roof)
+    panel = cube(f"{name}_solar_field", (11.00, 2.20, 0.045), (-0.65, 0.38, 3.675), solar, 0.008)
+    parts.append(panel)
+    if detailed:
+        for index in range(1, 20):
+            x = -6.15 + index * 0.55
+            grid = cube(f"{name}_solar_grid_x_{index}", (0.018, 2.21, 0.018), (x, 0.38, 3.705), metal)
+            parts.append(grid)
+        for index, y in enumerate((-0.34, 0.02, 0.38, 0.74, 1.10)):
+            grid = cube(f"{name}_solar_grid_y_{index}", (11.02, 0.018, 0.018), (-0.65, y, 3.705), metal)
+            parts.append(grid)
+    for index, x in enumerate((-4.60, 0.05, 4.70)):
+        parts.append(cube(f"{name}_roof_vent_curb_{index}", (0.62, 0.52, 0.12), (x, -1.55, 3.52), weathered_stone, 0.010))
+        parts.append(cube(f"{name}_roof_vent_{index}", (0.42, 0.34, 0.22), (x, -1.55, 3.67), dark_stone, 0.010))
+        parts.append(cube(f"{name}_roof_vent_cap_{index}", (0.52, 0.44, 0.07), (x, -1.55, 3.81), metal, 0.006))
+
+    # Six deep truck portals and ten upper arches establish the receiving face.
+    front_y = 2.00
+    for index, x in enumerate(WAREHOUSE_LOADING_BAYS):
+        warehouse_loading_bay(parts, f"{name}_loading_bay_{index}", x, front_y, detailed)
+    for index, x in enumerate(WAREHOUSE_FRONT_ARCHES):
+        warehouse_window(parts, f"{name}_front_arch_{index}", x, front_y, 2.14, True, detailed, 0.52, 0.76)
+    for index, x in enumerate(WAREHOUSE_FRONT_DIVIDERS):
+        parts.append(cube(f"{name}_front_pilaster_{index}", (0.22, 0.20, 2.88), (x, 2.08, 1.70), weathered_stone, 0.015))
+
+    parts.append(cube(f"{name}_canopy", (11.80, 1.00, 0.16), (-0.72, 2.38, 1.98), dark_stone, 0.018))
+    parts.append(cube(f"{name}_canopy_fascia", (11.88, 0.10, 0.28), (-0.72, 2.84, 1.89), weathered_stone, 0.010))
+    for index, x in enumerate(WAREHOUSE_FRONT_DIVIDERS):
+        parts.append(cube(f"{name}_canopy_column_{index}", (0.22, 0.24, 1.70), (x, 2.73, 1.05), dark_stone, 0.012))
+    if detailed:
+        bollard_xs = tuple(x + offset for x in WAREHOUSE_LOADING_BAYS for offset in (-0.84, 0.84))
+        for index, x in enumerate(bollard_xs):
+            parts.append(cylinder(f"{name}_bollard_{index}", 0.06, 0.44, (x, 2.46, 0.44), metal, 8))
+        for index, x in enumerate(WAREHOUSE_FRONT_DIVIDERS):
+            parts.append(cube(f"{name}_front_lamp_mount_{index}", (0.12, 0.09, 0.14), (x, 2.19, 2.20), metal, 0.008))
+            parts.append(ico(f"{name}_front_lamp_{index}", 0.065, (x, 2.25, 2.14), (1.0, 0.75, 1.0), lamps, 1))
+        for index, x in enumerate(WAREHOUSE_LOADING_BAYS):
+            parts.append(cube(f"{name}_apron_centerline_{index}", (0.045, 0.72, 0.018), (x, 2.48, 0.255), markings))
+        parts.append(cube(f"{name}_apron_dock_edge", (11.65, 0.045, 0.018), (-0.72, 2.02, 0.255), markings))
+
+    # The service elevation retains a personnel door and a denser twelve-arch rhythm.
+    rear_y = -2.60
+    for index, x in enumerate(WAREHOUSE_REAR_ARCHES):
+        warehouse_window(parts, f"{name}_rear_arch_{index}", x, rear_y, 1.12, False, detailed, 0.50, 1.00)
+    mine_door(parts, f"{name}_service_door", -6.72, rear_y - 0.03, 0.48, 1.18, detailed)
+    for index, x in enumerate(tuple(-6.20 + index for index in range(13))):
+        parts.append(cube(f"{name}_rear_pilaster_{index}", (0.18, 0.16, 2.74), (x, -2.68, 1.66), weathered_stone, 0.012))
+
+    # The pavilion is now a terminal module instead of half of the composition.
+    end_x = 7.37
+    parts.append(cube(f"{name}_end_pavilion", (1.30, 4.50, 3.40), (6.70, -0.30, 1.86), light_stone, 0.024))
+    parts.append(cube(f"{name}_end_step_left", (0.16, 0.48, 2.96), (7.34, -2.32, 1.66), weathered_stone, 0.012))
+    parts.append(cube(f"{name}_end_step_right", (0.16, 0.48, 2.96), (7.34, 1.72, 1.66), weathered_stone, 0.012))
+    parts.append(side_arch_face(f"{name}_end_receiving_door", end_x + 0.025, -0.30, 0.20, 1.80, 2.70, doors, 10 if detailed else 7))
+    side_arch_trim(parts, f"{name}_end_receiving_arch", end_x + 0.045, -0.30, 0.20, 1.80, 2.70, dark_stone, detailed)
+    for side, y in enumerate((-1.36, 0.76)):
+        parts.append(cube(f"{name}_end_door_jamb_{side}", (0.08, 0.24, 2.80), (end_x + 0.04, y, 1.57), dark_stone, 0.012))
+        pilaster_y = -2.08 if side == 0 else 1.48
+        parts.append(cube(f"{name}_end_pilaster_{side}", (0.08, 0.36, 3.18), (end_x + 0.04, pilaster_y, 1.80), weathered_stone, 0.014))
+        parts.append(cube(f"{name}_end_pilaster_base_{side}", (0.08, 0.52, 0.28), (end_x + 0.045, pilaster_y, 0.32), dark_stone, 0.010))
+        parts.append(cube(f"{name}_end_pilaster_cap_{side}", (0.08, 0.52, 0.20), (end_x + 0.045, pilaster_y, 3.28), dark_stone, 0.010))
+    parts.append(cube(f"{name}_end_door_sill", (0.08, 2.18, 0.12), (end_x + 0.045, -0.30, 0.18), dark_stone, 0.008))
+    parts.append(cube(f"{name}_end_cornice", (0.10, 4.38, 0.18), (end_x + 0.04, -0.30, 3.34), dark_stone, 0.018))
+    warehouse_end_pediment(parts, f"{name}_end", end_x, detailed, light_stone, dark_stone)
+    if detailed:
+        for panel in (-0.60, -0.30, 0, 0.30):
+            parts.append(cube(f"{name}_end_door_panel_{panel}", (0.025, 0.025, 1.95), (end_x + 0.045, -0.30 + panel, 1.28), dark_stone))
+        for index, y in enumerate((-1.62, 1.02)):
+            parts.append(cube(f"{name}_end_lamp_mount_{index}", (0.05, 0.10, 0.16), (end_x + 0.045, y, 1.72), metal, 0.006))
+            parts.append(ico(f"{name}_end_lamp_{index}", 0.04, (end_x + 0.055, y, 1.66), (0.78, 1.0, 1.0), lamps, 1))
+
+    return join_objects(parts, name)
+
+
 def mine_resource_anchor(collection, mine_asset):
     anchor = bpy.data.objects.new("mine_resource_anchor", None)
     anchor.empty_display_type = "PLAIN_AXES"
@@ -680,6 +890,8 @@ def build_assets():
     ]
     mine_lod0 = mine_shaft_house("mine_shaft_house_lod0", detailed=True)
     mine_lod1 = mine_shaft_house("mine_shaft_house_lod1", detailed=False)
+    warehouse_lod0 = warehouse_arcaded_depot("warehouse_lod0", detailed=True)
+    warehouse_lod1 = warehouse_arcaded_depot("warehouse_lod1", detailed=False)
     lod0_collection = bpy.data.collections.new("Environment_LOD0")
     bpy.context.scene.collection.children.link(lod0_collection)
     lod1_collection = bpy.data.collections.new("Environment_LOD1")
@@ -703,6 +915,13 @@ def build_assets():
     lod1_collection.objects.link(mine_lod1)
     mine_resource_anchor(lod0_collection, mine_lod0)
     all_assets.extend((mine_lod0, mine_lod1))
+    for collection in list(warehouse_lod0.users_collection):
+        collection.objects.unlink(warehouse_lod0)
+    lod0_collection.objects.link(warehouse_lod0)
+    for collection in list(warehouse_lod1.users_collection):
+        collection.objects.unlink(warehouse_lod1)
+    lod1_collection.objects.link(warehouse_lod1)
+    all_assets.extend((warehouse_lod0, warehouse_lod1))
     return all_assets
 
 
@@ -739,6 +958,31 @@ def validate_assets(assets):
             ceiling = 26000 if asset.name.endswith("_lod0") else 15000
             if triangles > ceiling:
                 raise RuntimeError(f"Mine asset exceeds its triangle budget: {asset.name} ({triangles} > {ceiling})")
+            print(
+                f"Validated {asset.name}: {triangles} triangles, "
+                f"bounds X[{min(xs):.3f}, {max(xs):.3f}] "
+                f"Y[{min(ys):.3f}, {max(ys):.3f}] "
+                f"Z[{minimum_z:.3f}, {max(vertex.co.z for vertex in asset.data.vertices):.3f}]"
+            )
+        if asset.name.startswith("warehouse_"):
+            xs = [vertex.co.x for vertex in asset.data.vertices]
+            ys = [vertex.co.y for vertex in asset.data.vertices]
+            if min(xs) < -7.5 or max(xs) > 7.5 or min(ys) < -3.0 or max(ys) > 3.0:
+                raise RuntimeError(
+                    f"Warehouse asset exceeds its 15x6 footprint: {asset.name} "
+                    f"X[{min(xs):.3f}, {max(xs):.3f}] Y[{min(ys):.3f}, {max(ys):.3f}]"
+                )
+            triangles = sum(max(1, len(polygon.vertices) - 2) for polygon in asset.data.polygons)
+            ceiling = 16000 if asset.name.endswith("_lod0") else 9000
+            if triangles > ceiling:
+                raise RuntimeError(
+                    f"Warehouse asset exceeds its triangle budget: {asset.name} ({triangles} > {ceiling})"
+                )
+            if max(xs) - min(xs) < 14.5 or max(ys) - min(ys) < 5.5:
+                raise RuntimeError(f"Warehouse asset no longer fills its declared footprint: {asset.name}")
+            maximum_z = max(vertex.co.z for vertex in asset.data.vertices)
+            if maximum_z > 4.30:
+                raise RuntimeError(f"Warehouse asset exceeds its low depot height: {asset.name} ({maximum_z:.3f} > 4.300)")
             print(
                 f"Validated {asset.name}: {triangles} triangles, "
                 f"bounds X[{min(xs):.3f}, {max(xs):.3f}] "

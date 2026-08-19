@@ -40,6 +40,16 @@ describe('WorldSession', () => {
     fixture.destroy();
   });
 
+  it('offers the mine and warehouse as separate construction tools', () => {
+    const fixture = TestBed.createComponent(WorldSession);
+    fixture.detectChanges();
+
+    const labels = [...fixture.nativeElement.querySelectorAll('.tool-palette button')]
+      .map((button: Element) => button.textContent?.trim());
+    expect(labels).toEqual(['Select', 'Mine', 'Warehouse']);
+    fixture.destroy();
+  });
+
   it('uses a manual-save fallback for unexpected manual-save failures', async () => {
     const fixture = TestBed.createComponent(WorldSession);
     fixture.detectChanges();

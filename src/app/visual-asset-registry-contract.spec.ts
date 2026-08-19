@@ -4,4 +4,8 @@ describe('visual asset registry contract', () => {
   it('registers the authored mine as a building asset family', () => {
     expect(getRegisteredVisualAssetFamily('mine_shaft_house')).toBe('building');
   });
+
+  it('registers the authored warehouse as a building asset family', () => {
+    expect(getRegisteredVisualAssetFamily('warehouse')).toBe('building');
+  });
 });

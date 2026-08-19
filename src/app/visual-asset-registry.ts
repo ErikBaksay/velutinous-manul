@@ -30,6 +30,7 @@ const ASSET_FAMILIES: Readonly<Record<string, VisualAssetFamily>> = Object.freez
   ore_copper: 'deposit',
   ore_stone: 'deposit',
   mine_shaft_house: 'building',
+  warehouse: 'building',
 });
 
 const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
@@ -49,6 +50,7 @@ const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
   ore_copper_lod0: 0x4e9b82,
   ore_stone_lod0: 0xb2afa0,
   mine_shaft_house_lod0: 0x928b7b,
+  warehouse_lod0: 0x8b8477,
 });
 
 export function getRegisteredVisualAssetFamily(baseId: string): VisualAssetFamily | undefined {
@@ -209,6 +211,7 @@ export class VisualAssetRegistry {
       ['ore_iron_lod0', 'deposit', createOreGeometry(0x9b5b4b)],
       ['ore_copper_lod0', 'deposit', createOreGeometry(0x4e9b82)],
       ['ore_stone_lod0', 'deposit', createOreGeometry(0xb2afa0)],
+      ['warehouse_lod0', 'building', new THREE.BoxGeometry(7.8, 3.2, 3.8)],
     ];
     for (const [id, family, geometry] of specs) {
       const preparedGeometry = prepareAssetGeometry(geometry);

@@ -66,8 +66,8 @@ describe('portable save codec', () => {
         rotationQuarterTurns: 3 as const,
       },
       {
-        id: 'future-structure-2',
-        definitionId: 'another-future-structure',
+        id: 'velutinous-manul-warehouse-1',
+        definitionId: 'velutinous-manul-warehouse',
         origin: { x: 0, y: 1 },
         rotationQuarterTurns: 1 as const,
       },

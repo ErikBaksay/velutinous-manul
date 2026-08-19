@@ -52,7 +52,7 @@ describe('visual asset registry', () => {
     registry.destroy();
   });
 
-  it('loads the composite mine while retaining grounded single-mesh nature assets', async () => {
+  it('loads the composite buildings while retaining grounded single-mesh nature assets', async () => {
     const registry = new VisualAssetRegistry();
     await registry.load();
 
@@ -80,6 +80,16 @@ describe('visual asset registry', () => {
       expect(size?.z).toBeLessThanOrEqual(6.01);
       expect(Array.isArray(mine.material)).toBe(true);
       expect(Array.isArray(mine.material) ? mine.material.length : 0).toBeGreaterThan(1);
+
+      const warehouse = registry.getLodAsset('warehouse_lod0', lod);
+      warehouse.geometry.computeBoundingBox();
+      const warehouseSize = warehouse.geometry.boundingBox?.getSize(new THREE.Vector3());
+      expect(warehouseSize?.x).toBeGreaterThanOrEqual(14.5);
+      expect(warehouseSize?.x).toBeLessThanOrEqual(15.01);
+      expect(warehouseSize?.z).toBeGreaterThanOrEqual(5.5);
+      expect(warehouseSize?.z).toBeLessThanOrEqual(6.01);
+      expect(Array.isArray(warehouse.material)).toBe(true);
+      expect(Array.isArray(warehouse.material) ? warehouse.material.length : 0).toBeGreaterThan(1);
     }
 
     registry.destroy();

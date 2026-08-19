@@ -2,6 +2,7 @@ import {
   BuildingDefinition,
   createBuildingDefinitionRegistry,
 } from './building-definitions';
+import { VELUTINOUS_MANUL_WAREHOUSE_DEFINITION } from './warehouse';
 
 export const VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID =
   'velutinous-manul-placeholder-mine' as const;
@@ -26,5 +27,6 @@ export function createVelutinousManulConstructionDefinitionRegistry(): ReadonlyM
 > {
   return createBuildingDefinitionRegistry([
     VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION,
+    VELUTINOUS_MANUL_WAREHOUSE_DEFINITION,
   ]);
 }

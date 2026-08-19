@@ -22,6 +22,7 @@ import {
   type PlacementValidationResult,
   validateBuildingPlacement,
   VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+  VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
 import { getRuntimeQueryParams } from './runtime-query';
 import {
@@ -70,9 +71,18 @@ import { WorldSessionRuntime } from './session-runtime';
               [class.is-active]="activeTool === 'mine'"
               (click)="activateMineTool()"
             >Mine</button>
+            <button
+              type="button"
+              [class.is-active]="activeTool === 'warehouse'"
+              (click)="activateWarehouseTool()"
+            >Warehouse</button>
           </div>
           @if (activeTool === 'mine') {
             <p class="tool-note">Hover over land to preview a large 15×6 shaft-house mine.</p>
+            <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
+          }
+          @if (activeTool === 'warehouse') {
+            <p class="tool-note">Hover over land to preview a broad 15×6 arcaded logistics warehouse.</p>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
           }
           @if (placementMessage) {
@@ -82,9 +92,9 @@ import { WorldSessionRuntime } from './session-runtime';
               role="status"
             >{{ placementMessage }}</p>
           }
-          @if (selectedPlaceholderMine) {
-            <button class="remove-action" type="button" (click)="removeSelectedMine()">
-              Remove Selected Mine
+          @if (selectedBuilding) {
+            <button class="remove-action" type="button" (click)="removeSelectedBuilding()">
+              Remove Selected Building
             </button>
           }
         </section>
@@ -367,7 +377,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   saveError: string | null = null;
   saveMessage = 'Autosave is preparing…';
   selectedCell: CellCoordinate | null = null;
-  activeTool: 'select' | 'mine' = 'select';
+  activeTool: 'select' | 'mine' | 'warehouse' = 'select';
   placementPreview: PlacementValidationResult | null = null;
   placementMessage: string | null = null;
   showSaveDialog = false;
@@ -483,18 +493,18 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   }
 
   activateMineTool(): void {
-    this.activeTool = 'mine';
-    this.placementMessage = 'Move over terrain to preview the shaft-house mine.';
-    if (this.selectedCell) {
-      this.updatePlacementPreview(this.selectedCell);
-    }
+    this.activateBuildingTool('mine');
+  }
+
+  activateWarehouseTool(): void {
+    this.activateBuildingTool('warehouse');
   }
 
   cancelPlacement(): void {
     this.selectTool();
   }
 
-  get selectedPlaceholderMine(): PlacedBuildingState | null {
+  get selectedBuilding(): PlacedBuildingState | null {
     if (!this.world || !this.selectedCell) {
       return null;
     }
@@ -506,22 +516,19 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       return null;
     }
     const buildingId = getOccupyingBuildingId(this.occupancy, cellIndex);
-    return this.world.gameplay.placedBuildings.find((building) =>
-      building.id === buildingId &&
-      building.definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
-    ) ?? null;
+    return this.world.gameplay.placedBuildings.find((building) => building.id === buildingId) ?? null;
   }
 
-  removeSelectedMine(): void {
-    const selectedMine = this.selectedPlaceholderMine;
-    if (!selectedMine || !this.world) {
+  removeSelectedBuilding(): void {
+    const selectedBuilding = this.selectedBuilding;
+    if (!selectedBuilding || !this.world) {
       return;
     }
     this.updatePlacedBuildings(this.world.gameplay.placedBuildings.filter((building) =>
-      building.id !== selectedMine.id,
+      building.id !== selectedBuilding.id,
     ));
-    this.placementMessage = 'Removed the selected mine.';
-    if (this.activeTool === 'mine' && this.selectedCell) {
+    this.placementMessage = `Removed the selected ${getBuildingLabel(selectedBuilding.definitionId)}.`;
+    if (this.activeTool !== 'select' && this.selectedCell) {
       this.updatePlacementPreview(this.selectedCell);
     }
   }
@@ -532,63 +539,70 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   }
 
   private handleCellHover(cell: CellCoordinate): void {
-    if (this.activeTool === 'mine') {
+    if (this.activeTool !== 'select') {
       this.updatePlacementPreview(cell);
     }
   }
 
   private handleCellClick(cell: CellCoordinate): void {
-    if (this.activeTool === 'mine') {
-      this.placePlaceholderMine(cell);
+    if (this.activeTool !== 'select') {
+      this.placeBuilding(cell);
       return;
     }
     this.selectCell(cell);
   }
 
   private handlePointerLeave(): void {
-    if (this.activeTool !== 'mine') {
+    if (this.activeTool === 'select') {
       return;
     }
     this.placementPreview = null;
-    this.placementMessage = 'Move over terrain to preview the shaft-house mine.';
+    this.placementMessage = `Move over terrain to preview the ${getBuildingLabel(this.getActiveDefinitionId())}.`;
     this.gameScene?.setPlacementPreview(null);
   }
 
   private updatePlacementPreview(origin: CellCoordinate): void {
-    const validation = this.validatePlaceholderMine(origin);
+    const definitionId = this.getActiveDefinitionId();
+    const label = getBuildingLabel(definitionId);
+    const validation = this.validateBuilding(definitionId, origin);
     this.placementPreview = validation;
     this.placementMessage = validation.valid
-      ? 'Valid placement — click to place the shaft-house mine.'
-      : `Cannot place mine: ${getPlacementFailureMessage(validation)}`;
+      ? `Valid placement — click to place the ${label}.`
+      : `Cannot place ${label}: ${getPlacementFailureMessage(validation)}`;
     this.gameScene?.setPlacementPreview(validation);
   }
 
-  private placePlaceholderMine(origin: CellCoordinate): void {
+  private placeBuilding(origin: CellCoordinate): void {
     if (!this.world) {
       return;
     }
-    const validation = this.validatePlaceholderMine(origin);
+    const definitionId = this.getActiveDefinitionId();
+    const label = getBuildingLabel(definitionId);
+    const validation = this.validateBuilding(definitionId, origin);
     if (!validation.valid) {
       this.placementPreview = validation;
-      this.placementMessage = `Cannot place mine: ${getPlacementFailureMessage(validation)}`;
+      this.placementMessage = `Cannot place ${label}: ${getPlacementFailureMessage(validation)}`;
       this.gameScene?.setPlacementPreview(validation);
       return;
     }
 
     const building: PlacedBuildingState = {
-      id: createNextPlaceholderMineId(this.world.gameplay.placedBuildings),
-      definitionId: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+      id: createNextBuildingId(this.world.gameplay.placedBuildings, definitionId),
+      definitionId,
       origin: { x: origin.x, y: origin.y },
       rotationQuarterTurns: 0,
     };
     this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building]);
     this.selectCell(origin);
-    this.placementMessage = `Placed shaft-house mine at ${origin.x}, ${origin.y}.`;
+    this.placementMessage = `Placed ${label} at ${origin.x}, ${origin.y}.`;
     this.placementPreview = null;
     this.gameScene?.setPlacementPreview(null);
   }
 
-  private validatePlaceholderMine(origin: CellCoordinate): PlacementValidationResult {
+  private validateBuilding(
+    definitionId: string,
+    origin: CellCoordinate,
+  ): PlacementValidationResult {
     if (!this.world) {
       throw new Error('Cannot validate placement without an active world.');
     }
@@ -597,10 +611,29 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       mapData: this.world.map.authoritativeData,
       definitions: this.constructionDefinitions,
       occupancy: this.occupancy,
-      definitionId: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+      definitionId,
       origin,
       rotationQuarterTurns: 0,
     });
+  }
+
+  private activateBuildingTool(tool: 'mine' | 'warehouse'): void {
+    this.activeTool = tool;
+    const label = getBuildingLabel(this.getActiveDefinitionId());
+    this.placementMessage = `Move over terrain to preview the ${label}.`;
+    if (this.selectedCell) {
+      this.updatePlacementPreview(this.selectedCell);
+    }
+  }
+
+  private getActiveDefinitionId(): string {
+    if (this.activeTool === 'mine') {
+      return VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID;
+    }
+    if (this.activeTool === 'warehouse') {
+      return VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID;
+    }
+    throw new Error('Select mode does not have an active building definition.');
   }
 
   private updatePlacedBuildings(placedBuildings: readonly PlacedBuildingState[]): void {
@@ -715,15 +748,24 @@ function createEmptyOccupancy(): CellOccupancy {
   };
 }
 
-function createNextPlaceholderMineId(
+function createNextBuildingId(
   buildings: readonly PlacedBuildingState[],
+  definitionId: string,
 ): string {
   const existingIds = new Set(buildings.map((building) => building.id));
   let ordinal = 1;
-  while (existingIds.has(`${VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID}-${ordinal}`)) {
+  while (existingIds.has(`${definitionId}-${ordinal}`)) {
     ordinal += 1;
   }
-  return `${VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID}-${ordinal}`;
+  return `${definitionId}-${ordinal}`;
+}
+
+function getBuildingLabel(definitionId: string): string {
+  return definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID
+    ? 'shaft-house mine'
+    : definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID
+      ? 'arcaded warehouse'
+      : 'building';
 }
 
 function getPlacementFailureMessage(validation: PlacementValidationResult): string {
@@ -731,13 +773,13 @@ function getPlacementFailureMessage(validation: PlacementValidationResult): stri
   switch (failure?.code) {
     case 'origin-out-of-bounds':
     case 'footprint-out-of-bounds':
-      return 'the mine footprint is outside the map';
+      return 'the building footprint is outside the map';
     case 'not-buildable':
       return 'the terrain is not buildable';
     case 'impassable':
       return 'the terrain is impassable';
     case 'water':
-      return 'the mine must be placed on land';
+      return 'the building must be placed on land';
     case 'slope-too-steep':
       return 'the terrain is too steep';
     case 'occupied':

@@ -1,4 +1,4 @@
-# Mine model design QA
+# Mine and warehouse model design QA
 
 ## Evidence
 
@@ -68,11 +68,69 @@ Fixes: limited composite GLTF loading to the building family, restored the proce
 
 The browser-rendered world shows upright conifers, distinct trunks, full broadleaf crowns, grounded understory, and restored distant rock massing. The normalized comparison contains no actionable P0, P1, or P2 asset-fidelity regression. The vegetation placement differs because the supplied deployed screenshot is from another deterministic world session; geometry contracts and exact LOD bounds were used to verify the underlying asset restoration.
 
+## Warehouse blueprint comparison
+
+### Evidence
+
+- Primary blueprint: `/tmp/codex-clipboard-44ec822c-fcc5-4394-93c5-ae0337eb6026.png`.
+- Superseded compact render: `/tmp/codex-clipboard-ede327f8-5716-4e07-82e9-f3008c1a665d.png`.
+- Authored three-quarter render: `art/environment/warehouse-preview.png`.
+- Front/loading elevation: `art/environment/warehouse-front-elevation.png`.
+- Rear/service elevation: `art/environment/warehouse-rear-elevation.png`.
+- Classical receiving end: `art/environment/warehouse-receiving-end.png`.
+- Top/roof view: `art/environment/warehouse-top.png`.
+- Browser-rendered implementation: `art/environment/warehouse-in-game.jpg`.
+- Browser state: corrected warehouse placed at cell 1009,208 and saved as `Warehouse 15x6 QA`.
+
+### Proportion correction pass — 20 resolved differences
+
+1. Replaced the undersized 8×4 footprint with a broad 15×6 footprint.
+2. Extended the enclosed hall from 7.42 to approximately 14.4 units.
+3. Increased enclosed depth from 2.70 to approximately 4.60 units.
+4. Rebalanced the mass into the blueprint's long, low depot silhouette without raising it vertically.
+5. Increased the loading inventory from four to six truck bays.
+6. Enlarged each loading door from 1.02×1.42 to approximately 1.45×1.65 units.
+7. Layered dark portals, doors, jambs, and lintels to create visibly recessed loading openings.
+8. Increased the front arcade from five to ten narrow arches.
+9. Increased the rear/service arcade from six to twelve arches.
+10. Tightened the front and rear pilaster cadence into a repeated modular masonry rhythm.
+11. Extended the canopy from 6.35 to 11.80 units across every loading bay.
+12. Deepened the canopy from 0.72 to 1.00 unit.
+13. Replaced thin 0.15-unit canopy posts with 0.22×0.24 structural piers.
+14. Deepened the loading apron to 1.10 units and added dock-edge and bay center markings.
+15. Recast the receiving pavilion as one terminal module rather than a dominant half-building mass.
+16. Added a layered entablature, stepped shoulders, pilaster bases/caps, inset stonework, and a framed pediment.
+17. Enlarged the receiving door to approximately 1.80×2.70 units and added a projecting archivolt.
+18. Replaced the compact-looking roof with a broad, shallow-pitch metal roof behind a continuous cornice.
+19. Expanded the solar field to approximately 11×2.2 units with a full panel grid and three restrained vents.
+20. Introduced warehouse-only neutral/weathered masonry values, dark recesses, and restrained warm loading lights without changing mine materials.
+
+The presentation's road network, parking field, fences, trucks, containers, and tanks remain contextual follow-up assets. The integral marked apron is included because it is part of the building's loading interface.
+
+### Fidelity result
+
+The corrected warehouse now has the proposal's defining identity and proportions: a broad low arcaded masonry hall, continuous six-bay loading canopy, dense upper arcade, classical terminal receiving pavilion, long rear service rhythm, low dark roof, large blue-black solar field, roof vents, marked apron, and warm exterior fixtures. It reads as a serious depot/logistics destination rather than the former compact block.
+
+### Warehouse verification
+
+- Definition ID: `velutinous-manul-warehouse`; footprint: 15×6.
+- Asset IDs: `warehouse_lod0`, `warehouse_lod1` in the existing shared GLB.
+- LOD0: 7,699 triangles; LOD1: 5,402 triangles.
+- Both LODs: approximately X[-7.460,7.488], Y[-2.900,2.900], Z[0,4.271].
+- Deterministic Blender validation: passed twice during final generation/export.
+- Angular browser suite: 30 files, 100 tests passed.
+- Production Angular build and e2e TypeScript check: passed; the pre-existing 11-byte stylesheet budget warning remains.
+- Browser flow: non-buildable and map-boundary invalid previews, valid authored placement at 1009,208, 15×6 selection, removal, manual save, leave, and reload all passed.
+- Reloaded browser view reconstructs the authored `warehouse_lod0`/`warehouse_lod1` family; the running development server reports clean rebuilds with no runtime compilation errors.
+- Mine preservation: LOD0/LOD1 remain 9,554/7,656 triangles with unchanged 15×6 bounds and stable definition/asset IDs.
+
 ## Follow-up polish
 
 - [P3] A later texture budget could add individual stone-block variation, grime, bolts, and timber grain beyond the current opaque low-poly materials.
 - [P3] Fine maintenance railings and wheel-rim fasteners from the close-up reference can be added without changing the accepted silhouette.
 - [P3] World vegetation is not cleared beneath placed buildings yet; this is an environment-placement concern rather than a mine-asset geometry mismatch.
+- [P3] Vegetation also remains beneath the warehouse footprint; clearing belongs to the shared placement/environment system.
+- [P3] Physical dock bumpers, cargo props, road markings, and trucks should arrive with the later transport slice rather than being baked into this asset.
 
 ## Verification
 

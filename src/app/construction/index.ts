@@ -5,3 +5,4 @@ export * from './occupancy';
 export * from './placeholder-mine';
 export * from './placement-validation';
 export * from './selection';
+export * from './warehouse';
