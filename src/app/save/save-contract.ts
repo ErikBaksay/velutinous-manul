@@ -9,7 +9,8 @@ import {
 export const SAVE_GAME_FORMAT = 'velutinous-manul-save' as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION = 1 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 = 2 as const;
-export const SAVE_GAME_SCHEMA_VERSION = 3 as const;
+export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 = 3 as const;
+export const SAVE_GAME_SCHEMA_VERSION = 4 as const;
 export const AUTOSAVE_ID = 'autosave' as const;
 export const AUTOSAVE_NAME = 'Autosave' as const;
 
@@ -20,6 +21,10 @@ export type QuarterTurn = 0 | 1 | 2 | 3;
 export interface GridOrigin {
   readonly x: number;
   readonly y: number;
+}
+
+export interface RoadState {
+  readonly cell: GridOrigin;
 }
 
 export interface PlacedBuildingState {
@@ -71,6 +76,7 @@ export interface MineralProductionState {
 
 export interface GameplayState {
   readonly placedBuildings: readonly PlacedBuildingState[];
+  readonly roads: readonly RoadState[];
   readonly production: MineralProductionState;
 }
 
@@ -140,6 +146,7 @@ export function createWorldSession(
     },
     gameplay: {
       placedBuildings: [],
+      roads: [],
       production: createEmptyMineralProductionState(),
     },
   };
@@ -197,6 +204,9 @@ export function createUpdatedWorldSession(
       placedBuildings: world.gameplay.placedBuildings.map((building) => ({
         ...building,
         origin: { ...building.origin },
+      })),
+      roads: world.gameplay.roads.map((road) => ({
+        cell: { ...road.cell },
       })),
       production: cloneMineralProductionState(world.gameplay.production),
     },

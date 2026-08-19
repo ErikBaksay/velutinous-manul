@@ -43,6 +43,7 @@ describe('save contract', () => {
     expect(session.map.authoritativeData.heightSamples).toBeInstanceOf(Uint16Array);
     expect(session.map.authoritativeData.heightSamples[0]).toBe(321);
     expect(session.gameplay.placedBuildings).toEqual([]);
+    expect(session.gameplay.roads).toEqual([]);
   });
 
   it('wraps a world session in the versioned save envelope', () => {
@@ -153,9 +154,10 @@ describe('save contract', () => {
         rotationQuarterTurns: 3 as const,
       },
     ];
+    const roads = [{ cell: { x: 4, y: 5 } }, { cell: { x: 8, y: 9 } }];
     const saveGame = createSaveGame(
       'save-005',
-      { ...world, gameplay: { ...world.gameplay, placedBuildings } },
+      { ...world, gameplay: { ...world.gameplay, placedBuildings, roads } },
       'Placed Buildings',
       'manual',
     );
@@ -163,6 +165,7 @@ describe('save contract', () => {
     const cloned = structuredClone(saveGame);
 
     expect(cloned.world.gameplay.placedBuildings).toEqual(placedBuildings);
+    expect(cloned.world.gameplay.roads).toEqual(roads);
   });
 });
 

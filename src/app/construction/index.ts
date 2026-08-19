@@ -4,5 +4,7 @@ export * from './grid-coordinates';
 export * from './occupancy';
 export * from './placeholder-mine';
 export * from './placement-validation';
+export * from './road-network';
 export * from './selection';
+export * from './terrain-sampling';
 export * from './warehouse';

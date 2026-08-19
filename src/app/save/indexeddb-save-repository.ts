@@ -2,6 +2,7 @@ import { Inject, Injectable, InjectionToken, Optional } from '@angular/core';
 import {
   createSaveSlotMetadata,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V2,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
   SaveGame,
   SaveSlotMetadata,
   SAVE_GAME_SCHEMA_VERSION,
@@ -169,6 +170,7 @@ function validateMetadata(value: unknown): SaveSlotMetadata {
   }
   const raw = value as Record<string, unknown>;
   if ((raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
+       raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
        raw['schemaVersion'] !== SAVE_GAME_SCHEMA_VERSION) ||
       raw['slotKind'] !== 'manual' && raw['slotKind'] !== 'autosave') {
     throw new SaveValidationError('The stored save metadata uses an unsupported format.');

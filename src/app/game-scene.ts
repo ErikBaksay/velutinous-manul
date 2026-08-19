@@ -22,13 +22,21 @@ import {
   BuildingDefinition,
   CellCoordinate,
   cellToWorldCenter,
+  deriveRoadConnectionMasks,
+  getRoadCellKey,
   getRotatedFootprintSize,
   getConstructionTerrainSample,
   terrainHitPointToCellCoordinate,
   VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
   VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
-import type { PlacedBuildingState } from './save/save-contract';
+import type { PlacedBuildingState, RoadState } from './save/save-contract';
+import type { RoadConnectionMask } from './construction/road-network';
+import {
+  createRaisedRoadTileGeometry,
+  deriveRoadGradeProfiles,
+  type RoadGradeProfile,
+} from './construction/road-geometry';
 import { clientPointToNormalizedDeviceCoordinate } from './construction/selection';
 
 export interface GameSceneCellInteractionCallbacks {
@@ -42,6 +50,11 @@ export interface GameScenePlacementPreview {
   readonly valid: boolean;
   readonly definitionId: string;
   readonly rotationQuarterTurns: 0 | 1 | 2 | 3;
+}
+
+export interface GameSceneRoadPreview {
+  readonly cell: CellCoordinate;
+  readonly valid: boolean;
 }
 
 const CAMERA_ORBIT_RADIUS = Math.sqrt(90 ** 2 + 90 ** 2 + 90 ** 2);
@@ -78,6 +91,8 @@ export class GameScene {
   private readonly placementPreviewVisual = createPlacementPreviewVisual();
   private readonly placementPreviewModelVisual = new THREE.Group();
   private readonly placedBuildingVisuals = new THREE.Group();
+  private readonly roadVisuals = new THREE.Group();
+  private readonly roadPreviewVisual = new THREE.Group();
   private readonly onCanvasPointerMove = (event: PointerEvent): void => {
     const cell = this.getTerrainCellFromPointer(event.clientX, event.clientY);
     if (cell) {
@@ -101,6 +116,8 @@ export class GameScene {
   private frameTimeMs = 16.67;
   private fps = 60;
   private renderCpuMs = 0;
+  private roadStates: readonly RoadState[] = [];
+  private roadPreviewCacheKey: string | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -137,11 +154,16 @@ export class GameScene {
     this.scene.fog = new THREE.Fog(0x76918e, CAMERA_FOG_NEAR, CAMERA_FAR_PLANE);
     this.mapBackdrop = createMapBackdrop();
     this.placedBuildingVisuals.name = 'construction-placed-buildings';
+    this.roadVisuals.name = 'construction-placed-roads';
+    this.roadPreviewVisual.name = 'construction-road-preview';
+    this.roadPreviewVisual.visible = false;
     this.scene.add(this.mapBackdrop);
     this.scene.add(this.selectedCellVisual);
     this.scene.add(this.placementPreviewVisual);
     this.placementPreviewModelVisual.name = 'construction-placement-preview-model';
     this.scene.add(this.placementPreviewModelVisual);
+    this.scene.add(this.roadVisuals);
+    this.scene.add(this.roadPreviewVisual);
     this.scene.add(this.placedBuildingVisuals);
     this.canvas.addEventListener('pointermove', this.onCanvasPointerMove);
     this.canvas.addEventListener('click', this.onCanvasClick);
@@ -194,6 +216,9 @@ export class GameScene {
     this.mapData = data;
     this.setSelectedCell(null);
     this.setPlacementPreview(null);
+    this.setRoadPreview(null);
+    this.clearRoadVisuals();
+    this.roadStates = [];
     this.clearPlacedBuildingVisuals();
     await this.visualAssetRegistry.load();
     this.chunkStreamingManager.beginMap(data, seaLevelSample);
@@ -309,6 +334,121 @@ export class GameScene {
     this.placementPreviewModelVisual.visible = true;
   }
 
+  setRoadPreview(preview: GameSceneRoadPreview | null): void {
+    const cacheKey = preview ? `${preview.cell.x},${preview.cell.y}:${preview.valid}` : null;
+    if (cacheKey === this.roadPreviewCacheKey) {
+      return;
+    }
+    this.roadPreviewCacheKey = cacheKey;
+    for (const child of this.roadVisuals.children) {
+      child.visible = true;
+    }
+    disposeObjectChildren(this.roadPreviewVisual);
+    if (!preview || !this.mapData || !isCellInMap(preview.cell)) {
+      this.roadPreviewVisual.visible = false;
+      return;
+    }
+
+    const isDuplicate = this.roadStates.some((road) =>
+      road.cell.x === preview.cell.x && road.cell.y === preview.cell.y,
+    );
+    if (!preview.valid || isDuplicate) {
+      const previewRoads = isDuplicate ? this.roadStates : [{ cell: preview.cell }];
+      const previewMask = isDuplicate
+        ? this.roadConnectionMasksForCurrentRoads().get(getRoadCellKey(preview.cell)) ?? 0
+        : 0;
+      const grade = deriveRoadGradeProfiles(this.mapData, MAP_DIMENSIONS, previewRoads)
+        .get(getRoadCellKey(preview.cell));
+      if (grade) {
+        const placedVisual = this.roadVisuals.children.find((child) =>
+          child.userData['roadCellKey'] === getRoadCellKey(preview.cell),
+        );
+        if (placedVisual) {
+          placedVisual.visible = false;
+        }
+        this.roadPreviewVisual.add(createRoadCellVisual(
+          this.mapData,
+          preview.cell,
+          previewMask,
+          grade,
+          'invalid-preview',
+        ));
+      }
+      this.roadPreviewVisual.visible = true;
+      return;
+    }
+
+    const proposedRoads = [...this.roadStates, { cell: preview.cell }];
+    const proposedMasks = deriveRoadConnectionMasks(proposedRoads);
+    const proposedGrades = deriveRoadGradeProfiles(this.mapData, MAP_DIMENSIONS, proposedRoads);
+    const affectedKeys = new Set([
+      getRoadCellKey(preview.cell),
+      getRoadCellKey({ x: preview.cell.x, y: preview.cell.y - 1 }),
+      getRoadCellKey({ x: preview.cell.x + 1, y: preview.cell.y }),
+      getRoadCellKey({ x: preview.cell.x, y: preview.cell.y + 1 }),
+      getRoadCellKey({ x: preview.cell.x - 1, y: preview.cell.y }),
+    ]);
+    for (const child of this.roadVisuals.children) {
+      if (affectedKeys.has(child.userData['roadCellKey'])) {
+        child.visible = false;
+      }
+    }
+    for (const road of proposedRoads) {
+      const key = getRoadCellKey(road.cell);
+      if (!affectedKeys.has(key)) {
+        continue;
+      }
+      const grade = proposedGrades.get(key);
+      if (!grade) {
+        continue;
+      }
+      this.roadPreviewVisual.add(createRoadCellVisual(
+        this.mapData,
+        road.cell,
+        proposedMasks.get(key) ?? 0,
+        grade,
+        key === getRoadCellKey(preview.cell) ? 'valid-preview' : 'placed',
+      ));
+    }
+    this.roadPreviewVisual.visible = true;
+  }
+
+  setRoads(
+    roads: readonly RoadState[],
+    connectionMasks: ReadonlyMap<string, RoadConnectionMask>,
+  ): void {
+    this.roadStates = roads.map((road) => ({ cell: { ...road.cell } }));
+    disposeObjectChildren(this.roadPreviewVisual);
+    this.roadPreviewVisual.visible = false;
+    this.roadPreviewCacheKey = null;
+    this.clearRoadVisuals();
+    if (!this.mapData) {
+      return;
+    }
+    const gradeProfiles = deriveRoadGradeProfiles(this.mapData, MAP_DIMENSIONS, roads);
+    for (const road of roads) {
+      if (!isCellInMap(road.cell)) {
+        continue;
+      }
+      const key = getRoadCellKey(road.cell);
+      const grade = gradeProfiles.get(key);
+      if (!grade) {
+        continue;
+      }
+      this.roadVisuals.add(createRoadCellVisual(
+        this.mapData,
+        road.cell,
+        connectionMasks.get(key) ?? 0,
+        grade,
+        'placed',
+      ));
+    }
+  }
+
+  private roadConnectionMasksForCurrentRoads(): ReadonlyMap<string, RoadConnectionMask> {
+    return deriveRoadConnectionMasks(this.roadStates);
+  }
+
   setPlacedBuildings(
     buildings: readonly PlacedBuildingState[],
     definitions: ReadonlyMap<string, BuildingDefinition>,
@@ -388,6 +528,10 @@ export class GameScene {
 
   private clearPlacedBuildingVisuals(): void {
     disposeObjectChildren(this.placedBuildingVisuals);
+  }
+
+  private clearRoadVisuals(): void {
+    disposeObjectChildren(this.roadVisuals);
   }
 
   private readonly render = (): void => {
@@ -614,6 +758,66 @@ function createMapBackdrop(): THREE.Mesh {
   backdrop.position.y = CAMERA_NAVIGATION_PLANE_Y - 0.04;
   backdrop.renderOrder = -1;
   return backdrop;
+}
+
+function isCellInMap(cell: CellCoordinate): boolean {
+  return cell.x >= 0 && cell.x < MAP_WIDTH && cell.y >= 0 && cell.y < MAP_HEIGHT;
+}
+
+function createRoadCellVisual(
+  mapData: AuthoritativeMapData,
+  cell: CellCoordinate,
+  connectionMask: RoadConnectionMask,
+  grade: RoadGradeProfile,
+  style: 'placed' | 'valid-preview' | 'invalid-preview',
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `construction-road-${cell.x}-${cell.y}`;
+  group.userData['roadCellKey'] = getRoadCellKey(cell);
+  const center = cellToWorldCenter(cell, MAP_DIMENSIONS);
+  group.position.set(center.x, 0, center.z);
+  const preview = style !== 'placed';
+  const validPreview = style === 'valid-preview';
+  const surfaceColor = validPreview ? 0x527d69 : style === 'invalid-preview' ? 0x9e5450 : 0x303a3b;
+  const embankmentColor = validPreview ? 0x82977a : style === 'invalid-preview' ? 0xa9776e : 0x81765f;
+  const markingColor = validPreview ? 0xc9e2ce : style === 'invalid-preview' ? 0xf1b1a7 : 0xd8d0ae;
+  const opacity = preview ? 0.72 : 1;
+  const geometries = createRaisedRoadTileGeometry({
+    mapData,
+    dimensions: MAP_DIMENSIONS,
+    cell,
+    connectionMask,
+    grade,
+  });
+
+  const createMaterial = (color: number, roughness: number): THREE.MeshStandardMaterial =>
+    new THREE.MeshStandardMaterial({
+      color,
+      roughness,
+      metalness: 0,
+      transparent: preview,
+      opacity,
+      depthWrite: !preview,
+      side: THREE.DoubleSide,
+    });
+  const addMesh = (
+    geometry: THREE.BufferGeometry | null,
+    color: number,
+    roughness: number,
+  ): void => {
+    if (!geometry) {
+      return;
+    }
+    const mesh = new THREE.Mesh(geometry, createMaterial(color, roughness));
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
+    group.add(mesh);
+  };
+  addMesh(geometries.embankment, embankmentColor, 0.96);
+  addMesh(geometries.asphalt, surfaceColor, 0.9);
+  addMesh(geometries.markings, markingColor, 0.82);
+
+  return group;
 }
 
 function createSelectedCellVisual(): THREE.Group {

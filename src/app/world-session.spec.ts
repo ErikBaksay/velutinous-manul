@@ -46,7 +46,7 @@ describe('WorldSession', () => {
 
     const labels = [...fixture.nativeElement.querySelectorAll('.tool-palette button')]
       .map((button: Element) => button.textContent?.trim());
-    expect(labels).toEqual(['Select', 'Mine', 'Warehouse']);
+    expect(labels).toEqual(['Select', 'Mine', 'Warehouse', 'Road']);
     fixture.destroy();
   });
 

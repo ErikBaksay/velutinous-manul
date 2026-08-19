@@ -133,6 +133,28 @@ describe('construction placement validation', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('rejects building footprints that overlap roads', () => {
+    const dimensions = { width: 2, height: 1 };
+    const mapData = createMapData(2, 1);
+    mapData.flags.fill(MAP_FLAG_CODES.buildable);
+    const definitions = createBuildingDefinitionRegistry([createDefinition('yard', 2, 1)]);
+    const occupancy = createCellOccupancy(dimensions, [], definitions).occupancy;
+
+    const result = validateBuildingPlacement({
+      dimensions,
+      mapData,
+      definitions,
+      occupancy,
+      roadCellIndices: new Set([1]),
+      definitionId: 'yard',
+      origin: { x: 0, y: 0 },
+      rotationQuarterTurns: 0,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.failures.map((failure) => failure.code)).toContain('road-occupied');
+  });
+
   it('returns stable failures for unknown definitions and invalid origins', () => {
     const dimensions = { width: 2, height: 2 };
     const mapData = createMapData(2, 2);

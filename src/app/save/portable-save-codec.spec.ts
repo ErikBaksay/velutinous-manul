@@ -73,10 +73,11 @@ describe('portable save codec', () => {
         rotationQuarterTurns: 1 as const,
       },
     ];
+    const roads = [{ cell: { x: 0, y: 0 } }, { cell: { x: 1, y: 1 } }];
     const content = serializeSaveGame(
       createSaveGame(
         'placed-building-save',
-        { ...world, gameplay: { ...world.gameplay, placedBuildings } },
+        { ...world, gameplay: { ...world.gameplay, placedBuildings, roads } },
         'Placed Buildings',
         'manual',
       ),
@@ -85,6 +86,7 @@ describe('portable save codec', () => {
     const parsed = parsePortableSaveFile(content);
 
     expect(parsed.world.gameplay.placedBuildings).toEqual(placedBuildings);
+    expect(parsed.world.gameplay.roads).toEqual(roads);
   });
 
   it('round-trips generic mineral production state', () => {
@@ -190,6 +192,38 @@ describe('portable save codec', () => {
     expect(parsed.world.gameplay.production).toEqual(createEmptyMineralProductionState());
   });
 
+  it('migrates a version-three portable file with empty road state', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'legacy-v3-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_106,
+    );
+    const current = JSON.parse(serializeSaveGame(createSaveGame(
+      'legacy-v3-save',
+      {
+        ...world,
+        gameplay: {
+          ...world.gameplay,
+          production: { ...world.gameplay.production, tick: 7 },
+        },
+      },
+      'Legacy v3 World',
+      'manual',
+    ))) as Record<string, any>;
+    current['schemaVersion'] = 3;
+    delete current['world']['gameplay']['roads'];
+
+    const parsed = parsePortableSaveFile(JSON.stringify(current));
+
+    expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(parsed.world.gameplay.roads).toEqual([]);
+    expect(parsed.world.gameplay.production.tick).toBe(7);
+  });
+
   it('rejects future schemas, malformed base64, and wrong typed-array lengths', () => {
     const world = createWorldSession(
       {
@@ -240,6 +274,18 @@ describe('portable save codec', () => {
       quantities: { 'iron-ore': -1, 'copper-ore': 0, stone: 0 },
     }];
     expect(() => parsePortableSaveFile(JSON.stringify(invalidProduction))).toThrow(SaveValidationError);
+
+    const invalidRoads = JSON.parse(serializeSaveGame(createSaveGame(
+      'invalid-save-4',
+      world,
+      'Invalid World',
+      'manual',
+    ))) as Record<string, any>;
+    invalidRoads['world']['gameplay']['roads'] = [
+      { cell: { x: 0, y: 0 } },
+      { cell: { x: 0, y: 0 } },
+    ];
+    expect(() => parsePortableSaveFile(JSON.stringify(invalidRoads))).toThrow(SaveValidationError);
   });
 });
 

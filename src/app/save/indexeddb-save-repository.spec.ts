@@ -86,6 +86,37 @@ describe('IndexedDbSaveRepository', () => {
     expect(metadata[0]?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
     await deleteDatabase(databaseName);
   });
+
+  it('loads a schema-three payload with empty road state', async () => {
+    const databaseName = `${SAVE_DATABASE_NAME}-road-migration-${crypto.randomUUID()}`;
+    const repository = new IndexedDbSaveRepository(databaseName);
+    const world = createWorldSession(
+      {
+        sessionId: 'road-migration-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_202,
+    );
+    const save = createSaveGame('road-migration-save', world, 'Road Migration World', 'manual');
+    await repository.put(save);
+
+    const legacyPayload = structuredClone(save) as unknown as Record<string, any>;
+    legacyPayload['schemaVersion'] = 3;
+    delete legacyPayload['world']['gameplay']['roads'];
+    const legacyMetadata = createSaveSlotMetadata(save) as unknown as Record<string, any>;
+    legacyMetadata['schemaVersion'] = 3;
+    await overwriteRecords(databaseName, legacyMetadata, legacyPayload);
+
+    const loaded = await repository.get(save.saveId);
+    const metadata = await repository.listMetadata();
+
+    expect(loaded?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(loaded?.world.gameplay.roads).toEqual([]);
+    expect(metadata[0]?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    await deleteDatabase(databaseName);
+  });
 });
 
 function createMapData(): AuthoritativeMapData {

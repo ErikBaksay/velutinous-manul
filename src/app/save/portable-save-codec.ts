@@ -14,6 +14,7 @@ import {
   createUpdatedWorldSession,
   LegacySaveGame,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V2,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
   SaveGame,
   SaveSlotKind,
   SAVE_GAME_FORMAT,
@@ -110,12 +111,17 @@ export function parsePortableSaveFile(content: string): SaveGame {
     );
   }
   if (schemaVersion !== 1 && schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError(`Save schema version ${schemaVersion} is not supported.`);
   }
 
   const saveId = assertNonEmptyString(envelope['saveId'], 'The save ID is missing or invalid.');
-  const world = decodeWorld(envelope['world'], schemaVersion === SAVE_GAME_SCHEMA_VERSION);
+  const world = decodeWorld(
+    envelope['world'],
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
+    schemaVersion === SAVE_GAME_SCHEMA_VERSION,
+  );
 
   if (schemaVersion === 1) {
     const legacy: LegacySaveGame = {
@@ -154,13 +160,18 @@ export function validateSaveGame(value: unknown): SaveGame {
   }
   const schemaVersion = save['schemaVersion'];
   if (schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError('The stored save uses an unsupported schema version.');
   }
   const saveId = assertNonEmptyString(save['saveId'], 'The stored save ID is invalid.');
   const slotName = assertNonEmptyString(save['slotName'], 'The stored save name is invalid.');
   const slotKind = assertSlotKind(save['slotKind']);
-  const world = validateWorld(save['world'], schemaVersion === SAVE_GAME_SCHEMA_VERSION);
+  const world = validateWorld(
+    save['world'],
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
+    schemaVersion === SAVE_GAME_SCHEMA_VERSION,
+  );
   return {
     format: SAVE_GAME_FORMAT,
     schemaVersion: SAVE_GAME_SCHEMA_VERSION,
@@ -202,7 +213,11 @@ function encodeWorld(world: WorldSession): PortableWorldSession {
   };
 }
 
-function decodeWorld(value: unknown, includeProduction: boolean): WorldSession {
+function decodeWorld(
+  value: unknown,
+  includeProduction: boolean,
+  includeRoads: boolean,
+): WorldSession {
   const raw = asRecord(value, 'The save world is missing or invalid.');
   const map = asRecord(raw['map'], 'The save map is missing or invalid.');
   const configuration = decodeMapConfig(map['configuration']);
@@ -220,12 +235,22 @@ function decodeWorld(value: unknown, includeProduction: boolean): WorldSession {
       generationSummary,
       authoritativeData,
     },
-    gameplay: decodeGameplay(raw['gameplay'], includeProduction),
+    gameplay: decodeGameplay(
+      raw['gameplay'],
+      includeProduction,
+      includeRoads,
+      configuration.width,
+      configuration.height,
+    ),
   };
-  return validateWorld(world, includeProduction);
+  return validateWorld(world, includeProduction, includeRoads);
 }
 
-function validateWorld(value: unknown, includeProduction: boolean): WorldSession {
+function validateWorld(
+  value: unknown,
+  includeProduction: boolean,
+  includeRoads: boolean,
+): WorldSession {
   const raw = asRecord(value, 'The world session is missing or invalid.');
   const map = asRecord(raw['map'], 'The world map is missing or invalid.');
   const configuration = validateMapConfig(map['configuration']);
@@ -243,7 +268,13 @@ function validateWorld(value: unknown, includeProduction: boolean): WorldSession
       generationSummary,
       authoritativeData,
     },
-    gameplay: validateGameplay(raw['gameplay'], includeProduction),
+    gameplay: validateGameplay(
+      raw['gameplay'],
+      includeProduction,
+      includeRoads,
+      configuration.width,
+      configuration.height,
+    ),
   };
 }
 
@@ -376,11 +407,23 @@ function validateAuthoritativeMapData(
   };
 }
 
-function decodeGameplay(value: unknown, includeProduction: boolean): WorldSession['gameplay'] {
-  return validateGameplay(value, includeProduction);
+function decodeGameplay(
+  value: unknown,
+  includeProduction: boolean,
+  includeRoads: boolean,
+  width: number,
+  height: number,
+): WorldSession['gameplay'] {
+  return validateGameplay(value, includeProduction, includeRoads, width, height);
 }
 
-function validateGameplay(value: unknown, includeProduction: boolean): WorldSession['gameplay'] {
+function validateGameplay(
+  value: unknown,
+  includeProduction: boolean,
+  includeRoads: boolean,
+  width: number,
+  height: number,
+): WorldSession['gameplay'] {
   const raw = asRecord(value, 'The gameplay state is missing or invalid.');
   if (!Array.isArray(raw['placedBuildings'])) {
     throw new SaveValidationError('The placed-building state is invalid.');
@@ -409,10 +452,36 @@ function validateGameplay(value: unknown, includeProduction: boolean): WorldSess
         rotationQuarterTurns: rotation as 0 | 1 | 2 | 3,
       };
     }),
+    roads: includeRoads
+      ? validateRoads(raw['roads'], width, height)
+      : [],
     production: includeProduction
       ? validateMineralProductionState(raw['production'])
       : createEmptyMineralProductionState(),
   };
+}
+
+function validateRoads(value: unknown, width: number, height: number): WorldSession['gameplay']['roads'] {
+  if (!Array.isArray(value)) {
+    throw new SaveValidationError('The road state is invalid.');
+  }
+
+  const seenCells = new Set<string>();
+  return value.map((road, index) => {
+    const item = asRecord(road, `Road ${index} is invalid.`);
+    const cell = asRecord(item['cell'], `Road ${index} cell is invalid.`);
+    const x = assertInteger(cell['x'], `Road ${index} X coordinate is invalid.`);
+    const y = assertInteger(cell['y'], `Road ${index} Y coordinate is invalid.`);
+    if (x < 0 || x >= width || y < 0 || y >= height) {
+      throw new SaveValidationError(`Road ${index} cell is outside the map.`);
+    }
+    const key = `${x},${y}`;
+    if (seenCells.has(key)) {
+      throw new SaveValidationError(`Road ${index} duplicates another road cell.`);
+    }
+    seenCells.add(key);
+    return { cell: { x, y } };
+  }).sort((left, right) => left.cell.y - right.cell.y || left.cell.x - right.cell.x);
 }
 
 function validateMineralProductionState(value: unknown): WorldSession['gameplay']['production'] {

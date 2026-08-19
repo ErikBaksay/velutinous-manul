@@ -11,17 +11,25 @@ import {
   createUpdatedWorldSession,
   type MineProductionState,
   type PlacedBuildingState,
+  type RoadState,
   type WorldSession as WorldSessionData,
 } from './save/save-contract';
 import {
+  addRoad,
   cellCoordinateToIndex,
   createCellOccupancy,
   createVelutinousManulConstructionDefinitionRegistry,
+  deriveRoadConnectionMasks,
+  getRoadCellIndices,
+  getRoadCellKey,
   getOccupyingBuildingId,
+  removeRoad,
   type CellCoordinate,
   type CellOccupancy,
   type PlacementValidationResult,
+  type RoadPlacementValidationResult,
   validateBuildingPlacement,
+  validateRoadPlacement,
   VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
   VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
@@ -86,6 +94,11 @@ import {
               [class.is-active]="activeTool === 'warehouse'"
               (click)="activateWarehouseTool()"
             >Warehouse</button>
+            <button
+              type="button"
+              [class.is-active]="activeTool === 'road'"
+              (click)="activateRoadTool()"
+            >Road</button>
           </div>
           @if (activeTool === 'mine') {
             <p class="tool-note">Hover over land to preview a large 15×6 shaft-house mine.</p>
@@ -134,10 +147,15 @@ import {
             >Place at Starting Area</button>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
           }
+          @if (activeTool === 'road') {
+            <p class="tool-note">Hover over land to preview a one-cell road segment.</p>
+            <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
+          }
           @if (placementMessage) {
             <p
               class="placement-message"
-              [class.is-error]="placementPreview && !placementPreview.valid"
+              [class.is-error]="(placementPreview && !placementPreview.valid) ||
+                (roadPlacementPreview && !roadPlacementPreview.valid)"
               role="status"
             >{{ placementMessage }}</p>
           }
@@ -181,7 +199,24 @@ import {
               Remove Selected Building
             </button>
           }
+          @if (selectedRoad && !selectedBuilding) {
+            <section class="production-card" data-testid="selected-road">
+              <h3>Road segment</h3>
+              <p data-testid="selected-road-cell">Cell: {{ selectedRoad.cell.x }}, {{ selectedRoad.cell.y }}</p>
+              <p data-testid="selected-road-mask">Connections: {{ selectedRoadMask }}</p>
+            </section>
+            <button class="remove-action" type="button" (click)="removeSelectedRoad()">
+              Remove Selected Road
+            </button>
+          }
         </section>
+        @if (roadStates.length > 0) {
+          <section class="production-card" data-testid="road-network-summary">
+            <h3>Road network</h3>
+            <p data-testid="road-count">Road cells: {{ roadStates.length }}</p>
+            <p data-testid="road-layout" [attr.data-road-layout]="roadLayout">{{ roadLayout }}</p>
+          </section>
+        }
         @if (warehouseProductionStates.length > 0) {
           <section class="production-card" data-testid="warehouse-inventory-list">
             <h3>Warehouse inventories</h3>
@@ -544,8 +579,9 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   saveError: string | null = null;
   saveMessage = 'Autosave is preparing…';
   selectedCell: CellCoordinate | null = null;
-  activeTool: 'select' | 'mine' | 'warehouse' = 'select';
+  activeTool: 'select' | 'mine' | 'warehouse' | 'road' = 'select';
   placementPreview: PlacementValidationResult | null = null;
+  roadPlacementPreview: RoadPlacementValidationResult | null = null;
   placementMessage: string | null = null;
   warehouseSelection = '';
   mineralDepositSelection = '';
@@ -672,8 +708,10 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   selectTool(): void {
     this.activeTool = 'select';
     this.placementPreview = null;
+    this.roadPlacementPreview = null;
     this.placementMessage = null;
     this.gameScene?.setPlacementPreview(null);
+    this.gameScene?.setRoadPreview(null);
   }
 
   activateMineTool(): void {
@@ -685,6 +723,17 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   activateWarehouseTool(): void {
     this.activateBuildingTool('warehouse');
+  }
+
+  activateRoadTool(): void {
+    this.activeTool = 'road';
+    this.placementPreview = null;
+    this.roadPlacementPreview = null;
+    this.placementMessage = 'Move over terrain to preview a road segment.';
+    this.gameScene?.setPlacementPreview(null);
+    if (this.selectedCell) {
+      this.updateRoadPreview(this.selectedCell);
+    }
   }
 
   cancelPlacement(): void {
@@ -770,6 +819,20 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     }
   }
 
+  removeSelectedRoad(): void {
+    const selectedRoad = this.selectedRoad;
+    if (!selectedRoad || !this.world) {
+      return;
+    }
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      this.world.gameplay.production,
+      removeRoad(this.world.gameplay.roads, selectedRoad.cell),
+    );
+    this.placementMessage = `Removed the road at ${selectedRoad.cell.x}, ${selectedRoad.cell.y}.`;
+    this.selectCell(selectedRoad.cell);
+  }
+
   private selectCell(cell: CellCoordinate): void {
     this.selectedCell = { x: cell.x, y: cell.y };
     this.warehouseSelection = this.selectedMineProduction?.assignedWarehouseId ?? '';
@@ -777,12 +840,18 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   }
 
   private handleCellHover(cell: CellCoordinate): void {
-    if (this.activeTool !== 'select') {
+    if (this.activeTool === 'road') {
+      this.updateRoadPreview(cell);
+    } else if (this.activeTool !== 'select') {
       this.updatePlacementPreview(cell);
     }
   }
 
   private handleCellClick(cell: CellCoordinate): void {
+    if (this.activeTool === 'road') {
+      this.placeRoad(cell);
+      return;
+    }
     if (this.activeTool !== 'select') {
       this.placeBuilding(cell);
       return;
@@ -792,6 +861,12 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   private handlePointerLeave(): void {
     if (this.activeTool === 'select') {
+      return;
+    }
+    if (this.activeTool === 'road') {
+      this.roadPlacementPreview = null;
+      this.placementMessage = 'Move over terrain to preview a road segment.';
+      this.gameScene?.setRoadPreview(null);
       return;
     }
     this.placementPreview = null;
@@ -808,6 +883,21 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       ? `Valid placement — click to place the ${label}.`
       : `Cannot place ${label}: ${getPlacementFailureMessage(validation)}`;
     this.gameScene?.setPlacementPreview(validation);
+  }
+
+  private updateRoadPreview(cell: CellCoordinate): void {
+    if (!this.world) {
+      return;
+    }
+    const validation = this.validateRoad(cell);
+    this.roadPlacementPreview = validation;
+    this.placementMessage = validation.valid
+      ? `Valid placement — click to place the road segment.`
+      : `Cannot place road: ${getRoadPlacementFailureMessage(validation)}`;
+    this.gameScene?.setRoadPreview({
+      cell: validation.cell,
+      valid: validation.valid,
+    });
   }
 
   private placeBuilding(origin: CellCoordinate): void {
@@ -848,6 +938,33 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.gameScene?.setPlacementPreview(null);
   }
 
+  private placeRoad(cell: CellCoordinate): void {
+    if (!this.world) {
+      return;
+    }
+    const validation = this.validateRoad(cell);
+    if (!validation.valid) {
+      this.roadPlacementPreview = validation;
+      this.placementMessage = `Cannot place road: ${getRoadPlacementFailureMessage(validation)}`;
+      this.gameScene?.setRoadPreview({
+        cell: validation.cell,
+        valid: false,
+      });
+      return;
+    }
+
+    const roads = addRoad(this.world.gameplay.roads, cell);
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      this.world.gameplay.production,
+      roads,
+    );
+    this.selectCell(cell);
+    this.placementMessage = `Placed road at ${cell.x}, ${cell.y}.`;
+    this.roadPlacementPreview = null;
+    this.gameScene?.setRoadPreview(null);
+  }
+
   private validateBuilding(
     definitionId: string,
     origin: CellCoordinate,
@@ -860,6 +977,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       mapData: this.world.map.authoritativeData,
       definitions: this.constructionDefinitions,
       occupancy: this.occupancy,
+      roadCellIndices: getRoadCellIndices(this.world.gameplay.roads, this.getGridDimensions()),
       definitionId,
       origin,
       rotationQuarterTurns: 0,
@@ -901,6 +1019,8 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   private activateBuildingTool(tool: 'mine' | 'warehouse'): void {
     this.activeTool = tool;
+    this.roadPlacementPreview = null;
+    this.gameScene?.setRoadPreview(null);
     const label = getBuildingLabel(this.getActiveDefinitionId());
     this.placementMessage = `Move over terrain to preview the ${label}.`;
     if (this.selectedCell) {
@@ -1034,7 +1154,20 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     if (this.activeTool === 'warehouse') {
       return VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID;
     }
-    throw new Error('Select mode does not have an active building definition.');
+    throw new Error('The active tool does not have a building definition.');
+  }
+
+  private validateRoad(cell: CellCoordinate): RoadPlacementValidationResult {
+    if (!this.world) {
+      throw new Error('Cannot validate road placement without an active world.');
+    }
+    return validateRoadPlacement({
+      dimensions: this.getGridDimensions(),
+      mapData: this.world.map.authoritativeData,
+      occupancy: this.occupancy,
+      roads: this.world.gameplay.roads,
+      cell,
+    });
   }
 
   formatMineralKind(kind: MineProductionState['resourceKind']): string {
@@ -1051,6 +1184,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   private updatePlacedBuildings(
     placedBuildings: readonly PlacedBuildingState[],
     production = this.world?.gameplay.production,
+    roads = this.world?.gameplay.roads ?? [],
   ): void {
     if (!this.world) {
       return;
@@ -1059,6 +1193,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       ...this.world,
       gameplay: {
         placedBuildings,
+        roads,
         production: reconcileMineralProductionState(
           production ?? this.world.gameplay.production,
           placedBuildings,
@@ -1074,6 +1209,10 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.gameScene?.setPlacedBuildings(
       this.world?.gameplay.placedBuildings ?? [],
       this.constructionDefinitions,
+    );
+    this.gameScene?.setRoads(
+      this.world?.gameplay.roads ?? [],
+      deriveRoadConnectionMasks(this.world?.gameplay.roads ?? []),
     );
   }
 
@@ -1094,6 +1233,34 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       width: this.world?.map.configuration.width ?? 1,
       height: this.world?.map.configuration.height ?? 1,
     };
+  }
+
+  get roadStates(): readonly RoadState[] {
+    return this.world?.gameplay.roads ?? [];
+  }
+
+  get selectedRoad(): RoadState | null {
+    if (!this.selectedCell) {
+      return null;
+    }
+    return this.roadStates.find((road) =>
+      road.cell.x === this.selectedCell?.x && road.cell.y === this.selectedCell?.y,
+    ) ?? null;
+  }
+
+  get selectedRoadMask(): number {
+    const selectedRoad = this.selectedRoad;
+    if (!selectedRoad) {
+      return 0;
+    }
+    return deriveRoadConnectionMasks(this.roadStates).get(getRoadCellKey(selectedRoad.cell)) ?? 0;
+  }
+
+  get roadLayout(): string {
+    const masks = deriveRoadConnectionMasks(this.roadStates);
+    return this.roadStates
+      .map((road) => `${getRoadCellKey(road.cell)}:${masks.get(getRoadCellKey(road.cell)) ?? 0}`)
+      .join('|');
   }
 
   readSelectValue(event: Event): string {
@@ -1242,8 +1409,32 @@ function getPlacementFailureMessage(validation: PlacementValidationResult): stri
       return 'the terrain is too steep';
     case 'occupied':
       return 'the footprint is occupied';
+    case 'road-occupied':
+      return 'the footprint contains a road';
     case 'missing-mineral-deposit':
       return 'the mine shaft must reach an iron, copper, or stone deposit';
+    default:
+      return 'the selected location is invalid';
+  }
+}
+
+function getRoadPlacementFailureMessage(validation: RoadPlacementValidationResult): string {
+  const failure = validation.failures[0];
+  switch (failure?.code) {
+    case 'out-of-bounds':
+      return 'the road cell is outside the map';
+    case 'not-buildable':
+      return 'the terrain is not buildable';
+    case 'impassable':
+      return 'the terrain is impassable';
+    case 'water':
+      return 'the road must be placed on land';
+    case 'slope-too-steep':
+      return 'the terrain is too steep';
+    case 'occupied-by-building':
+      return 'the cell is occupied by a building';
+    case 'duplicate-road':
+      return 'a road already occupies this cell';
     default:
       return 'the selected location is invalid';
   }

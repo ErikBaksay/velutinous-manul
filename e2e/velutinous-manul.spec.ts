@@ -176,6 +176,62 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await expect(page.getByTestId(expectedInventoryTestId)).toContainText('10');
   });
 
+  test('places a connected road chain and persists it with the mineral inventory', async ({ page }) => {
+    await prepareInitialWorld(page);
+    await page.getByRole('button', { name: /Accept World/ }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await waitForStreamingSettled(page);
+
+    await page.getByRole('button', { name: 'Warehouse', exact: true }).click();
+    await page.getByTestId('place-starting-warehouse').click();
+    await expect(page.locator('.placement-message')).toContainText('Placed arcaded warehouse');
+
+    await page.getByRole('button', { name: 'Mine', exact: true }).click();
+    const depositSelect = page.getByLabel('Mineral deposit target');
+    await depositSelect.selectOption('3');
+    await page.getByTestId('prepare-mine-deposit').click();
+    await page.getByTestId('place-focused-mine').click();
+    await expect(page.getByTestId('selected-mine-production')).toBeVisible();
+    const mineResource = await page.getByTestId('mine-resource').textContent();
+    const resourceSuffix = mineResource?.includes('Iron')
+      ? 'iron-ore'
+      : mineResource?.includes('Copper')
+        ? 'copper-ore'
+        : 'stone';
+
+    const warehouseDestination = page.getByLabel('Warehouse destination');
+    const warehouseIds = await warehouseDestination.locator('option').evaluateAll((options) =>
+      options
+        .map((option) => (option as HTMLOptionElement).value)
+        .filter((value) => value.length > 0),
+    );
+    await warehouseDestination.selectOption(warehouseIds[0]);
+    await page.getByRole('button', { name: 'Assign Warehouse', exact: true }).click();
+    await page.getByTestId('run-production-tick').click();
+    await expect(page.getByTestId('mine-delivered-total')).toContainText('10');
+
+    await placeDeterministicRoadChain(page);
+    await expect(page.getByTestId('road-count')).toContainText('3');
+    const roadLayout = await page.getByTestId('road-layout').getAttribute('data-road-layout');
+    expect(roadLayout).not.toBeNull();
+    expect(roadLayout!.split('|').some((entry) => Number(entry.split(':')[1]) > 0)).toBe(true);
+
+    await page.getByRole('button', { name: 'Save World', exact: true }).click();
+    await page.getByLabel('Save name').fill('Road Network Round Trip');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.save-note')).toContainText('Saved Road Network Round Trip');
+
+    await page.getByRole('button', { name: 'Leave World', exact: true }).click();
+    await page.getByRole('button', { name: /Load Save/ }).click();
+    const savedRow = page.locator('.save-row').filter({ hasText: 'Road Network Round Trip' });
+    await savedRow.getByRole('button', { name: 'Load', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await expect(page.getByTestId('road-count')).toContainText('3');
+    await expect(page.getByTestId('road-layout')).toHaveAttribute('data-road-layout', roadLayout!);
+    await expect(page.getByTestId('warehouse-inventory-list')).toBeVisible();
+    await expect(page.getByTestId(`warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`)).toContainText('10');
+  });
+
   test('locks generation input and exercises exploration controls', async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
     await prepareDeterministicWorld(page);
@@ -595,11 +651,96 @@ async function attachBrowserErrors(
 }
 
 async function getCanvasPoint(page: Page): Promise<{ x: number; y: number }> {
-  const box = await page.getByLabel('Interactive map camera').boundingBox();
+  const box = await page.locator(
+    'canvas[aria-label="Interactive map camera"], canvas[aria-label="Interactive world camera"]',
+  ).first().boundingBox();
   if (!box) {
     throw new Error('The interactive map canvas has no layout box.');
   }
   return { x: box.x + box.width * 0.78, y: box.y + box.height * 0.5 };
+}
+
+async function placeDeterministicRoadChain(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Road', exact: true }).click();
+  const roadCells = await page.evaluate(() => {
+    const angular = (window as unknown as {
+      ng?: {
+        getComponent?: (element: Element) => any;
+        applyChanges?: (component: any) => void;
+      };
+    }).ng;
+    const host = document.querySelector('app-world-session');
+    const component = host && angular?.getComponent?.(host);
+    if (!component) {
+      throw new Error('The Angular world-session component is unavailable to the browser test.');
+    }
+
+    component.activateRoadTool();
+    const selected = component.selectedCell ?? {
+      x: component.world.map.generationSummary.startingCell % component.world.map.configuration.width,
+      y: Math.floor(component.world.map.generationSummary.startingCell / component.world.map.configuration.width),
+    };
+    const candidates = new Map<string, { x: number; y: number }>();
+    for (let y = Math.max(0, selected.y - 80); y <= Math.min(component.world.map.configuration.height - 1, selected.y + 80); y += 1) {
+      for (let x = Math.max(0, selected.x - 80); x <= Math.min(component.world.map.configuration.width - 1, selected.x + 80); x += 1) {
+        const cell = { x, y };
+        if (component['validateRoad'](cell).valid) {
+          candidates.set(`${x},${y}`, cell);
+        }
+      }
+    }
+
+    const path = (start: { x: number; y: number }, length: number, current: { x: number; y: number }[]): { x: number; y: number }[] | null => {
+      if (current.length === length) {
+        return current;
+      }
+      const neighbors = [
+        { x: start.x + 1, y: start.y },
+        { x: start.x - 1, y: start.y },
+        { x: start.x, y: start.y + 1 },
+        { x: start.x, y: start.y - 1 },
+      ];
+      for (const neighbor of neighbors) {
+        const candidate = candidates.get(`${neighbor.x},${neighbor.y}`);
+        if (!candidate || current.some((cell) => cell.x === candidate.x && cell.y === candidate.y)) {
+          continue;
+        }
+        const result = path(candidate, length, [...current, candidate]);
+        if (result) {
+          return result;
+        }
+      }
+      return null;
+    };
+
+    for (const candidate of candidates.values()) {
+      const result = path(candidate, 3, [candidate]);
+      if (result) {
+        return result;
+      }
+    }
+    throw new Error(`Could not find three adjacent valid road cells among ${candidates.size} candidates.`);
+  });
+
+  await page.evaluate((cells) => {
+    const angular = (window as unknown as {
+      ng?: {
+        getComponent?: (element: Element) => any;
+        applyChanges?: (component: any) => void;
+      };
+    }).ng;
+    const host = document.querySelector('app-world-session');
+    const component = host && angular?.getComponent?.(host);
+    if (!component) {
+      throw new Error('The Angular world-session component is unavailable to the browser test.');
+    }
+    component.activateRoadTool();
+    for (const cell of cells) {
+      component['placeRoad'](cell);
+    }
+    angular?.applyChanges?.(component);
+  }, roadCells);
+  await expect(page.locator('.placement-message')).toContainText('Placed road');
 }
 
 async function holdKey(page: Page, key: string, milliseconds: number): Promise<void> {

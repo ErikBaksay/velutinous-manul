@@ -33,6 +33,7 @@ export type PlacementFailureCode =
   | 'water'
   | 'slope-too-steep'
   | 'occupied'
+  | 'road-occupied'
   | 'missing-mineral-deposit';
 
 export interface PlacementFailure {
@@ -60,6 +61,7 @@ export interface PlacementValidationInput {
   readonly mapData: AuthoritativeMapData;
   readonly definitions: ReadonlyMap<string, BuildingDefinition>;
   readonly occupancy: CellOccupancy;
+  readonly roadCellIndices?: ReadonlySet<number>;
   readonly definitionId: string;
   readonly origin: GridOrigin;
   readonly rotationQuarterTurns: QuarterTurn;
@@ -141,6 +143,7 @@ export function validateBuildingPlacement(
     const waterKind = input.mapData.waterKind[cellIndex] ?? WATER_KIND_CODES.none;
     const terrain = getConstructionTerrainSample(input.mapData, input.dimensions, cell);
     const occupiedBy = getOccupyingBuildingId(input.occupancy, cellIndex);
+    const roadOccupied = input.roadCellIndices?.has(cellIndex) ?? false;
     const cellFailures: PlacementFailure[] = [];
 
     if (definition.placement.requiresBuildable &&
@@ -165,6 +168,9 @@ export function validateBuildingPlacement(
     }
     if (occupiedBy !== undefined) {
       cellFailures.push({ code: 'occupied', cell, cellIndex, occupiedBy });
+    }
+    if (roadOccupied) {
+      cellFailures.push({ code: 'road-occupied', cell, cellIndex });
     }
 
     const diagnostic: PlacementCellDiagnostic = {
