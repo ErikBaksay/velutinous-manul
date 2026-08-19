@@ -1037,7 +1037,7 @@ def export_glb(output_path, assets):
     with open(manifest_path, "w", encoding="utf-8") as manifest_file:
         json.dump({
             "runtimeAsset": True,
-            "assetPath": "/assets/environment/environment.glb",
+            "assetPath": "assets/environment/environment.glb",
             "assetIds": sorted(
                 asset.name for asset in assets
             ),

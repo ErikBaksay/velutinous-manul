@@ -44,6 +44,7 @@ describe('save contract', () => {
     expect(session.map.authoritativeData.heightSamples[0]).toBe(321);
     expect(session.gameplay.placedBuildings).toEqual([]);
     expect(session.gameplay.roads).toEqual([]);
+    expect(session.gameplay.clearedCellIndices).toEqual([]);
   });
 
   it('wraps a world session in the versioned save envelope', () => {
@@ -155,9 +156,10 @@ describe('save contract', () => {
       },
     ];
     const roads = [{ cell: { x: 4, y: 5 } }, { cell: { x: 8, y: 9 } }];
+    const clearedCellIndices = [12, 13, 41];
     const saveGame = createSaveGame(
       'save-005',
-      { ...world, gameplay: { ...world.gameplay, placedBuildings, roads } },
+      { ...world, gameplay: { ...world.gameplay, placedBuildings, roads, clearedCellIndices } },
       'Placed Buildings',
       'manual',
     );
@@ -166,6 +168,7 @@ describe('save contract', () => {
 
     expect(cloned.world.gameplay.placedBuildings).toEqual(placedBuildings);
     expect(cloned.world.gameplay.roads).toEqual(roads);
+    expect(cloned.world.gameplay.clearedCellIndices).toEqual(clearedCellIndices);
   });
 });
 

@@ -51,6 +51,10 @@ jobs:
         run: |
           test -f dist/velutinous-manul/browser/index.html
           test -f dist/velutinous-manul/browser/velutinous-manul.png
+          test -f dist/velutinous-manul/browser/assets/environment/manifest.json
+          test -f dist/velutinous-manul/browser/assets/environment/environment.glb
+          grep -Fq '"assetPath": "assets/environment/environment.glb"' \
+            dist/velutinous-manul/browser/assets/environment/manifest.json
           test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name '*.js' -print -quit)"
           test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name '*.css' -print -quit)"
           test -n "$(find dist/velutinous-manul/browser -maxdepth 1 -name 'worker-*.js' -print -quit)"

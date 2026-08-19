@@ -113,6 +113,8 @@ export class ChunkStreamingManager {
   private rollingBundleBuildMs: number | null = null;
   private peakVisibleCount = 0;
   private activeBuild: ChunkBuildState | null = null;
+  private clearedCellIndices: readonly number[] = [];
+  private occupiedCellIndices: readonly number[] = [];
 
   constructor(
     scene: THREE.Scene,
@@ -153,6 +155,31 @@ export class ChunkStreamingManager {
       this.quality,
     );
     this.depositRenderer = new DepositChunkRenderer(this.scene, data, this.visualAssetRegistry, []);
+    this.environmentRenderer.setClearedCellIndices(this.clearedCellIndices);
+    this.depositRenderer.setOccupiedCellIndices(this.occupiedCellIndices);
+  }
+
+  setConstructionVisualState(
+    clearedCellIndices: readonly number[],
+    occupiedCellIndices: readonly number[],
+  ): void {
+    if (
+      areEqualCellIndexLists(this.clearedCellIndices, clearedCellIndices) &&
+      areEqualCellIndexLists(this.occupiedCellIndices, occupiedCellIndices)
+    ) {
+      return;
+    }
+
+    this.clearedCellIndices = [...clearedCellIndices];
+    this.occupiedCellIndices = [...occupiedCellIndices];
+    this.environmentRenderer?.setClearedCellIndices(this.clearedCellIndices);
+    this.depositRenderer?.setOccupiedCellIndices(this.occupiedCellIndices);
+    if (!this.hasMapData) {
+      return;
+    }
+
+    this.cancelActiveBuildForConstructionRefresh();
+    this.refreshAttachedConstructionVisuals();
   }
 
   beginInitialView(
@@ -390,6 +417,58 @@ export class ChunkStreamingManager {
     }
   }
 
+  private cancelActiveBuildForConstructionRefresh(): void {
+    const build = this.activeBuild;
+    if (!build) {
+      return;
+    }
+
+    this.disposePartialBuild(build);
+    const key = chunkKey(build.entry.coordinate);
+    if (this.desiredKeys.has(key)) {
+      build.record.state = 'queued';
+      this.queue.unshift({
+        epoch: this.mapEpoch,
+        viewRevision: this.viewRevision,
+        coordinate: build.entry.coordinate,
+      });
+    } else {
+      build.record.state = 'disposed';
+      this.records.delete(key);
+    }
+    this.activeBuild = null;
+    this.inFlightCount = 0;
+  }
+
+  private refreshAttachedConstructionVisuals(): void {
+    if (!this.environmentRenderer || !this.depositRenderer) {
+      return;
+    }
+
+    for (const record of this.records.values()) {
+      if (record.state !== 'attached' || !record.bundle) {
+        continue;
+      }
+
+      const { x, y } = record.coordinate;
+      this.environmentRenderer.removeChunk(x, y);
+      const environment = this.environmentRenderer.createChunk(x, y);
+      if (environment) {
+        this.environmentRenderer.attachChunk(x, y, environment);
+      }
+
+      this.depositRenderer.removeChunk(x, y);
+      const deposits = this.depositRenderer.createChunk(x, y);
+      this.depositRenderer.attachChunk(x, y, deposits);
+
+      record.bundle = {
+        ...record.bundle,
+        environment,
+        deposits,
+      };
+    }
+  }
+
   private finishBundleBuild(build: ChunkBuildState): void {
     const key = chunkKey(build.entry.coordinate);
     const bundle: ChunkBundle = {
@@ -570,6 +649,16 @@ function createCameraViewSignature(
     ...camera.projectionMatrix.elements,
     navigationState?.navigationPlaneY ?? 0,
   ].map((value) => Math.round(value * 1_000)).join(',');
+}
+
+function areEqualCellIndexLists(
+  first: readonly number[],
+  second: readonly number[],
+): boolean {
+  if (first.length !== second.length) {
+    return false;
+  }
+  return first.every((cellIndex, index) => cellIndex === second[index]);
 }
 
 function getActiveBuildBudgetMs(): number {

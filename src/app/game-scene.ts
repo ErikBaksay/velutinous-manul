@@ -250,6 +250,16 @@ export class GameScene {
     this.cameraController.setNavigationEnabled(enabled);
   }
 
+  setConstructionVisualState(
+    clearedCellIndices: readonly number[],
+    occupiedCellIndices: readonly number[],
+  ): void {
+    this.chunkStreamingManager.setConstructionVisualState(
+      clearedCellIndices,
+      occupiedCellIndices,
+    );
+  }
+
   focusCell(cell: CellCoordinate): void {
     if (!this.mapData) {
       return;

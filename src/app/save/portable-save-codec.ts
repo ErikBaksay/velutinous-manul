@@ -15,6 +15,7 @@ import {
   LegacySaveGame,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V2,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
   SaveGame,
   SaveSlotKind,
   SAVE_GAME_FORMAT,
@@ -112,6 +113,7 @@ export function parsePortableSaveFile(content: string): SaveGame {
   }
   if (schemaVersion !== 1 && schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError(`Save schema version ${schemaVersion} is not supported.`);
   }
@@ -120,6 +122,7 @@ export function parsePortableSaveFile(content: string): SaveGame {
   const world = decodeWorld(
     envelope['world'],
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
     schemaVersion === SAVE_GAME_SCHEMA_VERSION,
   );
 
@@ -161,6 +164,7 @@ export function validateSaveGame(value: unknown): SaveGame {
   const schemaVersion = save['schemaVersion'];
   if (schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError('The stored save uses an unsupported schema version.');
   }
@@ -170,6 +174,7 @@ export function validateSaveGame(value: unknown): SaveGame {
   const world = validateWorld(
     save['world'],
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
     schemaVersion === SAVE_GAME_SCHEMA_VERSION,
   );
   return {
@@ -217,6 +222,7 @@ function decodeWorld(
   value: unknown,
   includeProduction: boolean,
   includeRoads: boolean,
+  includeClearedCells: boolean,
 ): WorldSession {
   const raw = asRecord(value, 'The save world is missing or invalid.');
   const map = asRecord(raw['map'], 'The save map is missing or invalid.');
@@ -239,17 +245,19 @@ function decodeWorld(
       raw['gameplay'],
       includeProduction,
       includeRoads,
+      includeClearedCells,
       configuration.width,
       configuration.height,
     ),
   };
-  return validateWorld(world, includeProduction, includeRoads);
+  return validateWorld(world, includeProduction, includeRoads, includeClearedCells);
 }
 
 function validateWorld(
   value: unknown,
   includeProduction: boolean,
   includeRoads: boolean,
+  includeClearedCells: boolean,
 ): WorldSession {
   const raw = asRecord(value, 'The world session is missing or invalid.');
   const map = asRecord(raw['map'], 'The world map is missing or invalid.');
@@ -272,6 +280,7 @@ function validateWorld(
       raw['gameplay'],
       includeProduction,
       includeRoads,
+      includeClearedCells,
       configuration.width,
       configuration.height,
     ),
@@ -411,16 +420,18 @@ function decodeGameplay(
   value: unknown,
   includeProduction: boolean,
   includeRoads: boolean,
+  includeClearedCells: boolean,
   width: number,
   height: number,
 ): WorldSession['gameplay'] {
-  return validateGameplay(value, includeProduction, includeRoads, width, height);
+  return validateGameplay(value, includeProduction, includeRoads, includeClearedCells, width, height);
 }
 
 function validateGameplay(
   value: unknown,
   includeProduction: boolean,
   includeRoads: boolean,
+  includeClearedCells: boolean,
   width: number,
   height: number,
 ): WorldSession['gameplay'] {
@@ -455,10 +466,37 @@ function validateGameplay(
     roads: includeRoads
       ? validateRoads(raw['roads'], width, height)
       : [],
+    clearedCellIndices: includeClearedCells
+      ? validateClearedCellIndices(raw['clearedCellIndices'], width, height)
+      : [],
     production: includeProduction
       ? validateMineralProductionState(raw['production'])
       : createEmptyMineralProductionState(),
   };
+}
+
+function validateClearedCellIndices(
+  value: unknown,
+  width: number,
+  height: number,
+): readonly number[] {
+  if (!Array.isArray(value)) {
+    throw new SaveValidationError('The cleared-cell state is invalid.');
+  }
+
+  const cellCount = width * height;
+  const seen = new Set<number>();
+  return value.map((cellIndex, index) => {
+    const parsed = assertInteger(cellIndex, `Cleared cell ${index} is invalid.`);
+    if (parsed < 0 || parsed >= cellCount) {
+      throw new SaveValidationError(`Cleared cell ${index} is outside the map.`);
+    }
+    if (seen.has(parsed)) {
+      throw new SaveValidationError(`Cleared cell ${index} duplicates another cell.`);
+    }
+    seen.add(parsed);
+    return parsed;
+  }).sort((left, right) => left - right);
 }
 
 function validateRoads(value: unknown, width: number, height: number): WorldSession['gameplay']['roads'] {

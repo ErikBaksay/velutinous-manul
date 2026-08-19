@@ -10,9 +10,9 @@ Every implementation milestone is small enough to run and manually test. Work pa
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
 - **Current development stage:** Stage 1 — browser and 3D foundation with the first generic mine-to-warehouse gameplay slice implemented; Map Generation v1 Gate 6.3 approved for map creation and preview.
-- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placement, removal, and save/reload; Milestones 7–8 classical shaft-house asset contract and authored runtime integration; Milestone 9 arcaded warehouse authored asset and construction integration; Milestone 10 generic mineral production and warehouse transfer.
-- **Current task:** Review the generic mine-to-warehouse browser slice and its typed save/reload state in the world session.
-- **Next planned work:** Record manual gameplay feedback, then add roads and physical transport only after this deterministic transfer slice is approved.
+- **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placement, removal, and save/reload; Milestones 7–8 classical shaft-house asset contract and authored runtime integration; Milestone 9 arcaded warehouse authored asset and construction integration; Milestone 10 generic mineral production and warehouse transfer; Milestone 11 construction-aware natural-item clearing.
+- **Current task:** Manually review construction clearing in the actual world session, including decorative persistence after demolition and temporary mineral-deposit visual hiding.
+- **Next planned work:** Record manual gameplay feedback and continue the next approved construction or transport slice.
 - **Deferred systems:** Remaining production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -359,6 +359,16 @@ The separate pipeline and composed-scene alternatives were rejected because the 
 - Verify unit binding/production behavior, portable and IndexedDB migration/validation, application/e2e type checks, production build, and the deterministic browser transfer flow through save/reload.
 
 **Implementation status:** Implemented. The deterministic simulation uses 10 units per mine per tick, stable mine ordering, immediate full-buffer delivery to the explicitly assigned warehouse, and buffering when unassigned. Unit coverage includes all three mineral kinds, rotations, extraction radius, deterministic ties, shared capacity, exhaustion, buffering, explicit destinations, cleanup, and persistence/malformed-save cases. The browser scenario uses the deterministic world’s valid mineral deposit and verifies assignment, a tick, typed inventory, manual save, leave, load, and persisted quantity. The production build passes with the existing 11-byte global stylesheet budget warning.
+
+### Milestone 11 — Construction-aware natural-item clearing
+
+- Persist sorted cleared-cell indices in schema version 5 and migrate schema versions 1–4 with active construction backfill.
+- Remove decorative environment items from every building-footprint and road cell, retaining those clearings after demolition and save/reload.
+- Hide mineral outcrops and markers only while current construction occupies their cells, without changing deposit simulation data.
+- Refresh attached and in-flight streamed environment/deposit bundles when construction changes.
+- Verify construction cell derivation, renderer filtering, streaming refresh, save migration, application tests, production build, and e2e browser coverage.
+
+**Implementation status:** Implemented pending manual visual approval. Focused and full Angular unit suites pass (136 tests), e2e browser coverage passes (18 tests), application/e2e TypeScript checks pass, and the production build succeeds with the existing 11-byte CSS budget warning.
 
 ## Completed first implementation definition
 

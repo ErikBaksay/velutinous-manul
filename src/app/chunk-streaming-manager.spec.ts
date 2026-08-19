@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { createEmptyAuthoritativeMapData } from './map/map-types';
+import {
+  BIOME_KIND_CODES,
+  createEmptyAuthoritativeMapData,
+  MAP_CELL_COUNT,
+} from './map/map-types';
 import {
   ChunkStreamingManager,
   STREAMING_BUILD_BUDGET_MS,
@@ -104,6 +108,29 @@ describe('ChunkStreamingManager', () => {
       new THREE.Vector3(0, -1, 0),
     ));
     expect(hit).not.toBeNull();
+    manager.destroy();
+  });
+
+  it('refreshes attached environment bundles when construction clears cells', async () => {
+    const scene = new THREE.Scene();
+    const manager = new ChunkStreamingManager(scene);
+    const camera = createCamera();
+    const data = createEmptyAuthoritativeMapData();
+    data.biome.fill(BIOME_KIND_CODES.forest);
+
+    manager.beginMap(data, 32_000);
+    const ready = manager.beginInitialView(camera);
+    runFrames(manager, camera, 240);
+    await ready;
+
+    expect(manager.getDiagnostics().environmentInstanceCount).toBeGreaterThan(0);
+
+    manager.setConstructionVisualState(
+      Array.from({ length: MAP_CELL_COUNT }, (_, cellIndex) => cellIndex),
+      [],
+    );
+
+    expect(manager.getDiagnostics().environmentInstanceCount).toBe(0);
     manager.destroy();
   });
 });

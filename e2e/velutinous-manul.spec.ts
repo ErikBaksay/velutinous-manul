@@ -102,6 +102,7 @@ test.describe('Velutinous Manul browser diagnostics', () => {
       'data-starting-cell',
       generatedStartingCell!,
     );
+    expect(browserErrors.assetWarnings).toEqual([]);
     await waitForStreamingSettled(page, 120_000);
 
     await page.reload();
@@ -627,11 +628,25 @@ async function attachDiagnostic(
   return metrics;
 }
 
-function collectBrowserErrors(page: Page): { consoleErrors: string[]; pageErrors: string[] } {
-  const errors = { consoleErrors: [] as string[], pageErrors: [] as string[] };
+function collectBrowserErrors(page: Page): {
+  consoleErrors: string[];
+  pageErrors: string[];
+  assetWarnings: string[];
+} {
+  const errors = {
+    consoleErrors: [] as string[],
+    pageErrors: [] as string[],
+    assetWarnings: [] as string[],
+  };
   page.on('console', (message) => {
     if (message.type() === 'error') {
       errors.consoleErrors.push(message.text());
+    }
+    if (
+      message.type() === 'warning' &&
+      message.text().includes('[visual assets] authored GLB unavailable')
+    ) {
+      errors.assetWarnings.push(message.text());
     }
   });
   page.on('pageerror', (error) => {

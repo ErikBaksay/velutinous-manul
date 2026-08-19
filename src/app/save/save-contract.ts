@@ -10,7 +10,8 @@ export const SAVE_GAME_FORMAT = 'velutinous-manul-save' as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION = 1 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 = 2 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 = 3 as const;
-export const SAVE_GAME_SCHEMA_VERSION = 4 as const;
+export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 = 4 as const;
+export const SAVE_GAME_SCHEMA_VERSION = 5 as const;
 export const AUTOSAVE_ID = 'autosave' as const;
 export const AUTOSAVE_NAME = 'Autosave' as const;
 
@@ -77,6 +78,7 @@ export interface MineralProductionState {
 export interface GameplayState {
   readonly placedBuildings: readonly PlacedBuildingState[];
   readonly roads: readonly RoadState[];
+  readonly clearedCellIndices: readonly number[];
   readonly production: MineralProductionState;
 }
 
@@ -147,6 +149,7 @@ export function createWorldSession(
     gameplay: {
       placedBuildings: [],
       roads: [],
+      clearedCellIndices: [],
       production: createEmptyMineralProductionState(),
     },
   };
@@ -208,6 +211,7 @@ export function createUpdatedWorldSession(
       roads: world.gameplay.roads.map((road) => ({
         cell: { ...road.cell },
       })),
+      clearedCellIndices: [...(world.gameplay.clearedCellIndices ?? [])],
       production: cloneMineralProductionState(world.gameplay.production),
     },
   };

@@ -53,8 +53,20 @@ const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
   warehouse_lod0: 0x8b8477,
 });
 
+const DEFAULT_ENVIRONMENT_MANIFEST_PATH = 'assets/environment/manifest.json';
+const DEFAULT_ENVIRONMENT_GLB_PATH = 'assets/environment/environment.glb';
+
 export function getRegisteredVisualAssetFamily(baseId: string): VisualAssetFamily | undefined {
   return ASSET_FAMILIES[baseId];
+}
+
+export function resolveRuntimeAssetUrl(
+  assetPath: string,
+  baseHref: string = document.baseURI,
+): string {
+  // Runtime asset paths are owned by this application. Treat a legacy leading
+  // slash as project-relative so old manifests also work on repository Pages.
+  return new URL(assetPath.replace(/^\/+/, ''), baseHref).href;
 }
 
 export class VisualAssetRegistry {
@@ -69,7 +81,9 @@ export class VisualAssetRegistry {
     }
 
     try {
-      const manifestResponse = await fetch('/assets/environment/manifest.json');
+      const manifestResponse = await fetch(
+        resolveRuntimeAssetUrl(DEFAULT_ENVIRONMENT_MANIFEST_PATH),
+      );
       if (!manifestResponse.ok) {
         throw new Error(`Environment manifest is not available (${manifestResponse.status}).`);
       }
@@ -77,7 +91,9 @@ export class VisualAssetRegistry {
       if (!manifest.runtimeAsset) {
         throw new Error('Environment GLB has not been exported yet.');
       }
-      await this.loadGlb(manifest.assetPath ?? '/assets/environment/environment.glb');
+      await this.loadGlb(
+        resolveRuntimeAssetUrl(manifest.assetPath ?? DEFAULT_ENVIRONMENT_GLB_PATH),
+      );
       this.completeMissingAssetsWithFallback();
     } catch (error) {
       // Blender is an authoring dependency, not a runtime dependency. Keeping a

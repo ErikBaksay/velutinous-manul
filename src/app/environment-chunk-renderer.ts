@@ -46,6 +46,7 @@ export class EnvironmentChunkRenderer {
   private readonly viewTarget = new THREE.Vector3();
   private readonly viewDirection = new THREE.Vector3();
   private readonly lodRefreshQueue: string[] = [];
+  private clearedCellIndices = new Set<number>();
   private lodViewSignature = '';
   private viewHeight = 128;
 
@@ -90,6 +91,7 @@ export class EnvironmentChunkRenderer {
       this.assets,
       lod,
       this.quality.environmentPlacementBudget,
+      this.clearedCellIndices,
     );
     if (placements.length === 0) {
       return null;
@@ -204,6 +206,10 @@ export class EnvironmentChunkRenderer {
     return count;
   }
 
+  setClearedCellIndices(cellIndices: readonly number[]): void {
+    this.clearedCellIndices = new Set(cellIndices);
+  }
+
   attachChunk(chunkX: number, chunkY: number, objects: EnvironmentChunkObjects): void {
     for (const mesh of objects.meshes) {
       this.group.add(mesh);
@@ -267,9 +273,18 @@ export function countEnvironmentPlacements(
   chunkX: number,
   chunkY: number,
   assets: VisualAssetRegistry,
+  clearedCellIndices: ReadonlySet<number> = new Set(),
 ): number {
   assets.ensureReady();
-  return collectPlacements(data, chunkX, chunkY, assets, 0, Number.POSITIVE_INFINITY).length;
+  return collectPlacements(
+    data,
+    chunkX,
+    chunkY,
+    assets,
+    0,
+    Number.POSITIVE_INFINITY,
+    clearedCellIndices,
+  ).length;
 }
 
 function collectPlacements(
@@ -279,6 +294,7 @@ function collectPlacements(
   assets: VisualAssetRegistry,
   lod: 0 | 1,
   placementBudget: number,
+  clearedCellIndices: ReadonlySet<number>,
 ): Placement[] {
   const placements: Placement[] = [];
   for (let localY = 0; localY < TERRAIN_CHUNK_SIZE; localY += 1) {
@@ -286,6 +302,9 @@ function collectPlacements(
       const cellX = chunkX * TERRAIN_CHUNK_SIZE + localX;
       const cellY = chunkY * TERRAIN_CHUNK_SIZE + localY;
       if (cellX >= MAP_WIDTH || cellY >= MAP_HEIGHT) {
+        continue;
+      }
+      if (clearedCellIndices.has(cellY * MAP_WIDTH + cellX)) {
         continue;
       }
       const sample = sampleTerrainVisual(data, cellX, cellY);

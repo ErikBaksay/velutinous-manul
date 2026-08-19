@@ -1,7 +1,22 @@
 import * as THREE from 'three';
-import { VisualAssetRegistry } from './visual-asset-registry';
+import { resolveRuntimeAssetUrl, VisualAssetRegistry } from './visual-asset-registry';
 
 describe('visual asset registry', () => {
+  it('resolves runtime assets for root and repository-base deployments', () => {
+    expect(
+      resolveRuntimeAssetUrl(
+        'assets/environment/manifest.json',
+        'https://example.test/',
+      ),
+    ).toBe('https://example.test/assets/environment/manifest.json');
+    expect(
+      resolveRuntimeAssetUrl(
+        '/assets/environment/environment.glb',
+        'https://example.github.io/velutinous-manul/',
+      ),
+    ).toBe('https://example.github.io/velutinous-manul/assets/environment/environment.glb');
+  });
+
   it('exposes the complete original environment kit without external dependencies', () => {
     const registry = new VisualAssetRegistry();
     registry.ensureReady();

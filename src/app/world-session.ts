@@ -20,9 +20,12 @@ import {
   createCellOccupancy,
   createVelutinousManulConstructionDefinitionRegistry,
   deriveRoadConnectionMasks,
+  getCurrentConstructionCellIndices,
+  getPlacedBuildingCellIndices,
   getRoadCellIndices,
   getRoadCellKey,
   getOccupyingBuildingId,
+  mergeClearedCellIndices,
   removeRoad,
   type CellCoordinate,
   type CellOccupancy,
@@ -602,6 +605,10 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       ...this.world,
       gameplay: {
         ...this.world.gameplay,
+        clearedCellIndices: this.getClearedCellIndices(
+          this.world.gameplay.placedBuildings,
+          this.world.gameplay.roads,
+        ),
         production: reconcileMineralProductionState(
           this.world.gameplay.production,
           this.world.gameplay.placedBuildings,
@@ -634,6 +641,14 @@ export class WorldSession implements AfterViewInit, OnDestroy {
           onCellClick: (cell) => this.handleCellClick(cell),
           onPointerLeave: () => this.handlePointerLeave(),
         });
+        this.gameScene.setConstructionVisualState(
+          this.world.gameplay.clearedCellIndices,
+          getCurrentConstructionCellIndices(
+            this.occupancy,
+            this.world.gameplay.roads,
+            this.getGridDimensions(),
+          ),
+        );
         this.gameScene.setNavigationEnabled(false);
         return this.gameScene.setMapData(
           this.world.map.authoritativeData,
@@ -1194,6 +1209,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       gameplay: {
         placedBuildings,
         roads,
+        clearedCellIndices: this.getClearedCellIndices(placedBuildings, roads),
         production: reconcileMineralProductionState(
           production ?? this.world.gameplay.production,
           placedBuildings,
@@ -1206,6 +1222,16 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   private syncConstructionVisuals(): void {
     this.rebuildOccupancy();
+    this.gameScene?.setConstructionVisualState(
+      this.world?.gameplay.clearedCellIndices ?? [],
+      this.world
+        ? getCurrentConstructionCellIndices(
+          this.occupancy,
+          this.world.gameplay.roads,
+          this.getGridDimensions(),
+        )
+        : [],
+    );
     this.gameScene?.setPlacedBuildings(
       this.world?.gameplay.placedBuildings ?? [],
       this.constructionDefinitions,
@@ -1213,6 +1239,19 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.gameScene?.setRoads(
       this.world?.gameplay.roads ?? [],
       deriveRoadConnectionMasks(this.world?.gameplay.roads ?? []),
+    );
+  }
+
+  private getClearedCellIndices(
+    placedBuildings: readonly PlacedBuildingState[],
+    roads: readonly RoadState[],
+  ): readonly number[] {
+    const dimensions = this.getGridDimensions();
+    return mergeClearedCellIndices(
+      dimensions,
+      this.world?.gameplay.clearedCellIndices ?? [],
+      getPlacedBuildingCellIndices(placedBuildings, dimensions, this.constructionDefinitions),
+      [...getRoadCellIndices(roads, dimensions)],
     );
   }
 

@@ -32,6 +32,7 @@ export class DepositChunkRenderer {
   private readonly data: AuthoritativeMapData;
   private readonly assets: VisualAssetRegistry;
   private readonly ownsAssets: boolean;
+  private occupiedCellIndices = new Set<number>();
 
   constructor(
     scene: THREE.Scene,
@@ -81,17 +82,27 @@ export class DepositChunkRenderer {
       }
 
       const asset = this.assets.get(`ore_${kind === 'iron-ore' ? 'iron' : kind === 'copper-ore' ? 'copper' : 'stone'}_lod0`);
-      const rocks = new THREE.InstancedMesh(
-        asset.geometry,
-        asset.material,
-        kindDeposits.length * ROCKS_PER_DEPOSIT,
+      const outcrops = getVisibleOutcropPlacements(
+        this.data,
+        kindDeposits,
+        this.occupiedCellIndices,
       );
-      rocks.name = `deposit-outcrops-${kind}`;
-      placeOutcropInstances(this.data, kindDeposits, rocks);
-      rockMeshes.push(rocks);
+      if (outcrops.length > 0) {
+        const rocks = new THREE.InstancedMesh(
+          asset.geometry,
+          asset.material,
+          outcrops.length,
+        );
+        rocks.name = `deposit-outcrops-${kind}`;
+        placeOutcropInstances(this.data, outcrops, rocks);
+        rockMeshes.push(rocks);
+      }
 
       const ringMaterial = this.getRingMaterial(kind);
       for (const deposit of kindDeposits) {
+        if (this.occupiedCellIndices.has(deposit.centerCell)) {
+          continue;
+        }
         markerRings.push(createMarkerRing(this.data, deposit, this.ringGeometry, ringMaterial));
       }
     }
@@ -132,6 +143,10 @@ export class DepositChunkRenderer {
     return this.chunks.size;
   }
 
+  setOccupiedCellIndices(cellIndices: readonly number[]): void {
+    this.occupiedCellIndices = new Set(cellIndices);
+  }
+
   private getRingMaterial(kind: DepositSource['kind']): THREE.MeshBasicMaterial {
     let material = this.ringMaterials.get(kind);
     if (!material) {
@@ -157,17 +172,22 @@ export interface DepositChunkObjects {
   readonly markerRings: readonly THREE.Mesh[];
 }
 
-function placeOutcropInstances(
+interface DepositOutcropPlacement {
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly rockIndex: number;
+  readonly rockScale: number;
+  readonly variation: number;
+}
+
+function getVisibleOutcropPlacements(
   data: AuthoritativeMapData,
   deposits: readonly DepositSource[],
-  rocks: THREE.InstancedMesh,
-): void {
-  const matrix = new THREE.Matrix4();
-  const position = new THREE.Vector3();
-  const rotation = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  let instanceIndex = 0;
-
+  occupiedCellIndices: ReadonlySet<number>,
+): readonly DepositOutcropPlacement[] {
+  const placements: DepositOutcropPlacement[] = [];
   for (const deposit of deposits) {
     const centerX = deposit.centerCell % MAP_WIDTH;
     const centerY = Math.floor(deposit.centerCell / MAP_WIDTH);
@@ -176,24 +196,51 @@ function placeOutcropInstances(
       const spread = deposit.radius * 0.42;
       const offsetX = ((variation & 0xff) / 255 - 0.5) * spread;
       const offsetY = (((variation >>> 8) & 0xff) / 255 - 0.5) * spread;
-      const sampleX = Math.round(centerX + offsetX);
-      const sampleY = Math.round(centerY + offsetY);
-      const rockScale = 0.86 + ((variation >>> 16) & 0xff) / 255 * 0.62;
-      position.set(
-        centerX - MAP_WIDTH / 2 + 0.5 + offsetX,
-        sampleHeight(data, sampleX, sampleY) + rockScale * 0.72,
-        centerY - MAP_HEIGHT / 2 + 0.5 + offsetY,
-      );
-      rotation.setFromAxisAngle(
-        new THREE.Vector3(0, 1, 0),
-        ((variation >>> 24) / 255) * Math.PI * 2,
-      );
-      scale.set(rockScale, rockScale * (0.72 + rockIndex * 0.08), rockScale);
-      matrix.compose(position, rotation, scale);
-      rocks.setMatrixAt(instanceIndex, matrix);
-      instanceIndex += 1;
+      const sampleX = Math.min(Math.max(Math.round(centerX + offsetX), 0), MAP_WIDTH - 1);
+      const sampleY = Math.min(Math.max(Math.round(centerY + offsetY), 0), MAP_HEIGHT - 1);
+      if (occupiedCellIndices.has(sampleY * MAP_WIDTH + sampleX)) {
+        continue;
+      }
+      placements.push({
+        centerX,
+        centerY,
+        offsetX,
+        offsetY,
+        rockIndex,
+        rockScale: 0.86 + ((variation >>> 16) & 0xff) / 255 * 0.62,
+        variation,
+      });
     }
   }
+  return placements;
+}
+
+function placeOutcropInstances(
+  data: AuthoritativeMapData,
+  placements: readonly DepositOutcropPlacement[],
+  rocks: THREE.InstancedMesh,
+): void {
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+
+  placements.forEach((placement, index) => {
+    const sampleX = Math.min(Math.max(Math.round(placement.centerX + placement.offsetX), 0), MAP_WIDTH - 1);
+    const sampleY = Math.min(Math.max(Math.round(placement.centerY + placement.offsetY), 0), MAP_HEIGHT - 1);
+    position.set(
+      placement.centerX - MAP_WIDTH / 2 + 0.5 + placement.offsetX,
+      sampleHeight(data, sampleX, sampleY) + placement.rockScale * 0.72,
+      placement.centerY - MAP_HEIGHT / 2 + 0.5 + placement.offsetY,
+    );
+    rotation.setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      ((placement.variation >>> 24) / 255) * Math.PI * 2,
+    );
+    scale.set(placement.rockScale, placement.rockScale * (0.72 + placement.rockIndex * 0.08), placement.rockScale);
+    matrix.compose(position, rotation, scale);
+    rocks.setMatrixAt(index, matrix);
+  });
   rocks.instanceMatrix.needsUpdate = true;
 }
 

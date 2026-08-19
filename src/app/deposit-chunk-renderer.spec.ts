@@ -45,6 +45,29 @@ describe('deposit outcrops', () => {
     expect(assets.has('ore_iron_lod0')).toBe(true);
     assets.destroy();
   });
+
+  it('hides occupied deposit visuals without changing the deposit source', () => {
+    const deposit = createDeposit(1, 'stone', 512, 512);
+    const data = createDepositData([deposit]);
+    const scene = new THREE.Scene();
+    const assets = new VisualAssetRegistry();
+    assets.ensureReady();
+    const renderer = new DepositChunkRenderer(scene, data, assets, []);
+
+    const visible = renderer.createChunk(16, 16);
+    renderer.setOccupiedCellIndices([deposit.centerCell]);
+    const hidden = renderer.createChunk(16, 16);
+    renderer.setOccupiedCellIndices([]);
+    const restored = renderer.createChunk(16, 16);
+
+    expect(visible.markerRings).toHaveLength(1);
+    expect(hidden.markerRings).toHaveLength(0);
+    expect(restored.markerRings).toHaveLength(1);
+    expect(data.deposits).toEqual([deposit]);
+
+    renderer.destroy();
+    assets.destroy();
+  });
 });
 
 function createDeposit(

@@ -8,6 +8,7 @@ import {
   createEmptyMineralProductionState,
   createSaveGame,
   createWorldSession,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
   SAVE_GAME_SCHEMA_VERSION,
 } from './save-contract';
 import {
@@ -74,10 +75,11 @@ describe('portable save codec', () => {
       },
     ];
     const roads = [{ cell: { x: 0, y: 0 } }, { cell: { x: 1, y: 1 } }];
+    const clearedCellIndices = [1, 3];
     const content = serializeSaveGame(
       createSaveGame(
         'placed-building-save',
-        { ...world, gameplay: { ...world.gameplay, placedBuildings, roads } },
+        { ...world, gameplay: { ...world.gameplay, placedBuildings, roads, clearedCellIndices } },
         'Placed Buildings',
         'manual',
       ),
@@ -87,6 +89,7 @@ describe('portable save codec', () => {
 
     expect(parsed.world.gameplay.placedBuildings).toEqual(placedBuildings);
     expect(parsed.world.gameplay.roads).toEqual(roads);
+    expect(parsed.world.gameplay.clearedCellIndices).toEqual(clearedCellIndices);
   });
 
   it('round-trips generic mineral production state', () => {
@@ -222,6 +225,32 @@ describe('portable save codec', () => {
     expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
     expect(parsed.world.gameplay.roads).toEqual([]);
     expect(parsed.world.gameplay.production.tick).toBe(7);
+  });
+
+  it('migrates a version-four portable file with empty cleared-cell state', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'legacy-v4-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_107,
+    );
+    const current = JSON.parse(serializeSaveGame(createSaveGame(
+      'legacy-v4-save',
+      { ...world, gameplay: { ...world.gameplay, roads: [{ cell: { x: 1, y: 1 } }] } },
+      'Legacy v4 World',
+      'manual',
+    ))) as Record<string, any>;
+    current['schemaVersion'] = LEGACY_SAVE_GAME_SCHEMA_VERSION_V4;
+    delete current['world']['gameplay']['clearedCellIndices'];
+
+    const parsed = parsePortableSaveFile(JSON.stringify(current));
+
+    expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(parsed.world.gameplay.roads).toEqual([{ cell: { x: 1, y: 1 } }]);
+    expect(parsed.world.gameplay.clearedCellIndices).toEqual([]);
   });
 
   it('rejects future schemas, malformed base64, and wrong typed-array lengths', () => {

@@ -1,4 +1,5 @@
 export * from './building-definitions';
+export * from './cell-state';
 export * from './footprint';
 export * from './grid-coordinates';
 export * from './occupancy';
