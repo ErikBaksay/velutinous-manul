@@ -32,7 +32,8 @@ export type PlacementFailureCode =
   | 'impassable'
   | 'water'
   | 'slope-too-steep'
-  | 'occupied';
+  | 'occupied'
+  | 'missing-mineral-deposit';
 
 export interface PlacementFailure {
   readonly code: PlacementFailureCode;

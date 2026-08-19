@@ -1,5 +1,11 @@
 import { Inject, Injectable, InjectionToken, Optional } from '@angular/core';
-import { createSaveSlotMetadata, SaveGame, SaveSlotMetadata } from './save-contract';
+import {
+  createSaveSlotMetadata,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V2,
+  SaveGame,
+  SaveSlotMetadata,
+  SAVE_GAME_SCHEMA_VERSION,
+} from './save-contract';
 import { SaveValidationError, validateSaveGame } from './portable-save-codec';
 
 export const SAVE_DATABASE_NAME = 'velutinous-manul-saves';
@@ -162,7 +168,9 @@ function validateMetadata(value: unknown): SaveSlotMetadata {
     throw new SaveValidationError('The stored save metadata is invalid.');
   }
   const raw = value as Record<string, unknown>;
-  if (raw['schemaVersion'] !== 2 || raw['slotKind'] !== 'manual' && raw['slotKind'] !== 'autosave') {
+  if ((raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
+       raw['schemaVersion'] !== SAVE_GAME_SCHEMA_VERSION) ||
+      raw['slotKind'] !== 'manual' && raw['slotKind'] !== 'autosave') {
     throw new SaveValidationError('The stored save metadata uses an unsupported format.');
   }
   const strings = ['saveId', 'slotName', 'seed', 'configHash', 'mapIdentity', 'mapHash'];
@@ -180,7 +188,10 @@ function validateMetadata(value: unknown): SaveSlotMetadata {
   if (raw['preset'] !== 'balanced-continental' && raw['preset'] !== 'riverlands' && raw['preset'] !== 'highland-frontier') {
     throw new SaveValidationError('The stored save metadata preset is invalid.');
   }
-  return raw as unknown as SaveSlotMetadata;
+  return {
+    ...(raw as unknown as SaveSlotMetadata),
+    schemaVersion: SAVE_GAME_SCHEMA_VERSION,
+  };
 }
 
 function compareMetadata(left: SaveSlotMetadata, right: SaveSlotMetadata): number {

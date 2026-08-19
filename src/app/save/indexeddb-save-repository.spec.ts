@@ -1,5 +1,10 @@
 import { AuthoritativeMapData, DEFAULT_MAP_CONFIG, MapSummary, RESOURCE_KINDS } from '../map/map-types';
-import { createSaveGame, createWorldSession } from './save-contract';
+import {
+  createSaveGame,
+  createSaveSlotMetadata,
+  createWorldSession,
+  SAVE_GAME_SCHEMA_VERSION,
+} from './save-contract';
 import {
   IndexedDbSaveRepository,
   SAVE_DATABASE_NAME,
@@ -48,6 +53,37 @@ describe('IndexedDbSaveRepository', () => {
     const stores = await readStoreNames(databaseName);
 
     expect(stores).toEqual(expect.arrayContaining([SAVE_METADATA_STORE, SAVE_PAYLOAD_STORE]));
+    await deleteDatabase(databaseName);
+  });
+
+  it('loads a schema-two payload with empty production state', async () => {
+    const databaseName = `${SAVE_DATABASE_NAME}-migration-${crypto.randomUUID()}`;
+    const repository = new IndexedDbSaveRepository(databaseName);
+    const world = createWorldSession(
+      {
+        sessionId: 'migration-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_201,
+    );
+    const save = createSaveGame('migration-save', world, 'Migration World', 'manual');
+    await repository.put(save);
+
+    const legacyPayload = structuredClone(save) as unknown as Record<string, any>;
+    legacyPayload['schemaVersion'] = 2;
+    delete legacyPayload['world']['gameplay']['production'];
+    const legacyMetadata = createSaveSlotMetadata(save) as unknown as Record<string, any>;
+    legacyMetadata['schemaVersion'] = 2;
+    await overwriteRecords(databaseName, legacyMetadata, legacyPayload);
+
+    const loaded = await repository.get(save.saveId);
+    const metadata = await repository.listMetadata();
+
+    expect(loaded?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(loaded?.world.gameplay.production.tick).toBe(0);
+    expect(metadata[0]?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
     await deleteDatabase(databaseName);
   });
 });
@@ -115,6 +151,34 @@ function deleteDatabase(databaseName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(databaseName);
     request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function overwriteRecords(
+  databaseName: string,
+  metadata: Record<string, any>,
+  payload: Record<string, any>,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(databaseName);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction(
+        [SAVE_METADATA_STORE, SAVE_PAYLOAD_STORE],
+        'readwrite',
+      );
+      transaction.objectStore(SAVE_METADATA_STORE).put(metadata);
+      transaction.objectStore(SAVE_PAYLOAD_STORE).put(payload);
+      transaction.oncomplete = () => {
+        database.close();
+        resolve();
+      };
+      transaction.onerror = () => {
+        database.close();
+        reject(transaction.error);
+      };
+    };
     request.onerror = () => reject(request.error);
   });
 }

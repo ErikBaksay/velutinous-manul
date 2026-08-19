@@ -9,6 +9,7 @@ import {
 import { Router } from '@angular/router';
 import {
   createUpdatedWorldSession,
+  type MineProductionState,
   type PlacedBuildingState,
   type WorldSession as WorldSessionData,
 } from './save/save-contract';
@@ -32,6 +33,15 @@ import {
   AUTOSAVE_INTERVAL_MS,
 } from './save/save-persistence';
 import { WorldSessionRuntime } from './session-runtime';
+import {
+  addMineProductionState,
+  addWarehouseProductionState,
+  assignMineWarehouse,
+  findMineDepositBinding,
+  reconcileMineralProductionState,
+  removeBuildingProductionState,
+  runMineralProductionTick,
+} from './mineral-production';
 
 @Component({
   selector: 'app-world-session',
@@ -79,10 +89,49 @@ import { WorldSessionRuntime } from './session-runtime';
           </div>
           @if (activeTool === 'mine') {
             <p class="tool-note">Hover over land to preview a large 15×6 shaft-house mine.</p>
+            <label class="deposit-target">
+              Mineral deposit target
+              <select
+                aria-label="Mineral deposit target"
+                [value]="mineralDepositSelection"
+                (change)="mineralDepositSelection = readSelectValue($event)"
+              >
+                <option value="">Choose a deposit</option>
+                @for (deposit of mineralDeposits; track deposit.id) {
+                  <option [value]="deposit.id">#{{ deposit.id }} — {{ formatMineralKind(deposit.kind) }}</option>
+                }
+              </select>
+            </label>
+            <button
+              class="secondary-action"
+              type="button"
+              (click)="focusSelectedMineralDeposit()"
+              [disabled]="!mineralDepositSelection"
+            >Focus Deposit</button>
+            <button
+              class="secondary-action"
+              type="button"
+              data-testid="prepare-mine-deposit"
+              (click)="prepareSelectedMineralDepositPlacement()"
+              [disabled]="!mineralDepositSelection"
+            >Prepare Mine at Deposit</button>
+            <button
+              class="secondary-action"
+              type="button"
+              data-testid="place-focused-mine"
+              (click)="placeFocusedMine()"
+              [disabled]="!placementPreview?.valid"
+            >Place Focused Mine</button>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
           }
           @if (activeTool === 'warehouse') {
             <p class="tool-note">Hover over land to preview a broad 15×6 arcaded logistics warehouse.</p>
+            <button
+              class="secondary-action"
+              type="button"
+              data-testid="place-starting-warehouse"
+              (click)="placeWarehouseAtStartingArea()"
+            >Place at Starting Area</button>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
           }
           @if (placementMessage) {
@@ -93,11 +142,63 @@ import { WorldSessionRuntime } from './session-runtime';
             >{{ placementMessage }}</p>
           }
           @if (selectedBuilding) {
+            @if (selectedMineProduction) {
+              <section class="production-card" data-testid="selected-mine-production">
+                <h3>Mine production</h3>
+                <p data-testid="mine-resource">Resource: {{ formatMineralKind(selectedMineProduction.resourceKind) }}</p>
+                <p data-testid="mine-deposit">Deposit: #{{ selectedMineProduction.depositId }}</p>
+                <p data-testid="mine-remaining-capacity">Remaining capacity: {{ selectedDepositRemainingCapacity }}</p>
+                <p data-testid="mine-output-buffer">Buffered: {{ selectedMineProduction.outputBuffer }}</p>
+                <p data-testid="mine-produced-total">Produced: {{ selectedMineProduction.producedTotal }}</p>
+                <p data-testid="mine-delivered-total">Delivered: {{ selectedMineProduction.deliveredTotal }}</p>
+                <label>
+                  Warehouse destination
+                  <select
+                    aria-label="Warehouse destination"
+                    [value]="warehouseSelection"
+                    (change)="warehouseSelection = readSelectValue($event)"
+                  >
+                    <option value="">Unassigned</option>
+                    @for (warehouse of warehouseBuildings; track warehouse.id) {
+                      <option [value]="warehouse.id">{{ warehouse.id }}</option>
+                    }
+                  </select>
+                </label>
+                <button type="button" class="secondary-action" (click)="assignSelectedMineWarehouse()">
+                  Assign Warehouse
+                </button>
+              </section>
+            }
+            @if (selectedWarehouseInventory) {
+              <section class="production-card" data-testid="selected-warehouse-inventory">
+                <h3>Warehouse inventory</h3>
+                <p data-testid="warehouse-iron-ore">Iron ore: {{ selectedWarehouseInventory.quantities['iron-ore'] }}</p>
+                <p data-testid="warehouse-copper-ore">Copper ore: {{ selectedWarehouseInventory.quantities['copper-ore'] }}</p>
+                <p data-testid="warehouse-stone">Stone: {{ selectedWarehouseInventory.quantities.stone }}</p>
+              </section>
+            }
             <button class="remove-action" type="button" (click)="removeSelectedBuilding()">
               Remove Selected Building
             </button>
           }
         </section>
+        @if (warehouseProductionStates.length > 0) {
+          <section class="production-card" data-testid="warehouse-inventory-list">
+            <h3>Warehouse inventories</h3>
+            @for (warehouse of warehouseProductionStates; track warehouse.warehouseBuildingId) {
+              <h4>{{ warehouse.warehouseBuildingId }}</h4>
+              <p [attr.data-testid]="'warehouse-inventory-' + warehouse.warehouseBuildingId + '-iron-ore'">
+                Iron ore: {{ warehouse.quantities['iron-ore'] }}
+              </p>
+              <p [attr.data-testid]="'warehouse-inventory-' + warehouse.warehouseBuildingId + '-copper-ore'">
+                Copper ore: {{ warehouse.quantities['copper-ore'] }}
+              </p>
+              <p [attr.data-testid]="'warehouse-inventory-' + warehouse.warehouseBuildingId + '-stone'">
+                Stone: {{ warehouse.quantities.stone }}
+              </p>
+            }
+          </section>
+        }
         @if (sceneError) {
           <p class="scene-error" role="alert">{{ sceneError }}</p>
         }
@@ -123,6 +224,12 @@ import { WorldSessionRuntime } from './session-runtime';
         }
 
         @if (!showSaveDialog) {
+          <p class="production-tick" data-testid="production-tick">
+            Simulation tick: {{ world?.gameplay?.production?.tick ?? 0 }}
+          </p>
+          <button type="button" data-testid="run-production-tick" (click)="runSimulationTick()" [disabled]="isSaving">
+            Run Tick
+          </button>
           <button type="button" (click)="openSaveDialog()">Save World</button>
         }
         <button class="secondary-action" type="button" (click)="leaveWorld()" [disabled]="isLeaving">
@@ -215,6 +322,12 @@ import { WorldSessionRuntime } from './session-runtime';
         color: #efb29c;
       }
 
+      .production-tick {
+        margin: 10px 0 0;
+        color: #b9b0a7;
+        font-size: 10px;
+      }
+
       .selected-cell {
         margin: 0 0 4px;
         color: #f0c08c;
@@ -251,6 +364,60 @@ import { WorldSessionRuntime } from './session-runtime';
         font: inherit;
         font-size: 10px;
         font-weight: 650;
+      }
+
+      .production-card {
+        display: grid;
+        gap: 5px;
+        padding: 10px;
+        color: #d9d0c7;
+        background: rgba(255, 247, 237, 0.04);
+        border: 1px solid rgba(247, 232, 214, 0.12);
+        border-radius: 8px;
+        font-size: 10px;
+      }
+
+      .production-card h3,
+      .production-card p {
+        margin: 0;
+      }
+
+      .production-card h3 {
+        color: #f5e8d9;
+        font-size: 11px;
+      }
+
+      .production-card label {
+        display: grid;
+        gap: 5px;
+        margin-top: 4px;
+      }
+
+      .production-card select {
+        padding: 7px 8px;
+        color: #f7ecdf;
+        background: rgba(255, 247, 237, 0.07);
+        border: 1px solid rgba(247, 232, 214, 0.16);
+        border-radius: 6px;
+        font: inherit;
+        font-size: 10px;
+      }
+
+      .deposit-target {
+        display: grid;
+        gap: 5px;
+        color: #a9a097;
+        font-size: 10px;
+      }
+
+      .deposit-target select {
+        padding: 7px 8px;
+        color: #f7ecdf;
+        background: rgba(255, 247, 237, 0.07);
+        border: 1px solid rgba(247, 232, 214, 0.16);
+        border-radius: 6px;
+        font: inherit;
+        font-size: 10px;
       }
 
       .tool-palette button.is-active {
@@ -380,6 +547,8 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   activeTool: 'select' | 'mine' | 'warehouse' = 'select';
   placementPreview: PlacementValidationResult | null = null;
   placementMessage: string | null = null;
+  warehouseSelection = '';
+  mineralDepositSelection = '';
   showSaveDialog = false;
   manualSaveName = '';
   isSaving = false;
@@ -393,9 +562,24 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       return;
     }
 
+    this.world = {
+      ...this.world,
+      gameplay: {
+        ...this.world.gameplay,
+        production: reconcileMineralProductionState(
+          this.world.gameplay.production,
+          this.world.gameplay.placedBuildings,
+        ),
+      },
+    };
+    this.sessionRuntime.setActiveWorld(this.world);
     this.rebuildOccupancy();
 
-    void this.performAutosave();
+    setTimeout(() => {
+      if (!this.isDestroyed) {
+        void this.performAutosave();
+      }
+    }, 0);
     this.autosaveTimer = setInterval(() => {
       void this.performAutosave();
     }, AUTOSAVE_INTERVAL_MS);
@@ -494,6 +678,9 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   activateMineTool(): void {
     this.activateBuildingTool('mine');
+    if (!this.mineralDepositSelection && this.mineralDeposits[0]) {
+      this.mineralDepositSelection = String(this.mineralDeposits[0].id);
+    }
   }
 
   activateWarehouseTool(): void {
@@ -519,14 +706,64 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     return this.world.gameplay.placedBuildings.find((building) => building.id === buildingId) ?? null;
   }
 
+  get selectedMineProduction(): MineProductionState | null {
+    const selectedBuilding = this.selectedBuilding;
+    if (!selectedBuilding || !this.world) {
+      return null;
+    }
+    return this.world.gameplay.production.mines.find((mine) =>
+      mine.mineBuildingId === selectedBuilding.id,
+    ) ?? null;
+  }
+
+  get selectedDepositRemainingCapacity(): number {
+    const mine = this.selectedMineProduction;
+    if (!mine || !this.world) {
+      return 0;
+    }
+    return this.world.gameplay.production.deposits.find((deposit) =>
+      deposit.depositId === mine.depositId,
+    )?.remainingCapacity ?? 0;
+  }
+
+  get warehouseBuildings(): readonly PlacedBuildingState[] {
+    return this.world?.gameplay.placedBuildings.filter((building) =>
+      building.definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
+    ) ?? [];
+  }
+
+  get mineralDeposits(): readonly WorldSessionData['map']['authoritativeData']['deposits'][number][] {
+    return this.world?.map.authoritativeData.deposits ?? [];
+  }
+
+  get selectedWarehouseInventory(): WorldSessionData['gameplay']['production']['warehouses'][number] | null {
+    const selectedBuilding = this.selectedBuilding;
+    if (!selectedBuilding || selectedBuilding.definitionId !== VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID) {
+      return null;
+    }
+    return this.world?.gameplay.production.warehouses.find((warehouse) =>
+      warehouse.warehouseBuildingId === selectedBuilding.id,
+    ) ?? null;
+  }
+
+  get warehouseProductionStates(): readonly WorldSessionData['gameplay']['production']['warehouses'][number][] {
+    return this.world?.gameplay?.production?.warehouses ?? [];
+  }
+
   removeSelectedBuilding(): void {
     const selectedBuilding = this.selectedBuilding;
     if (!selectedBuilding || !this.world) {
       return;
     }
-    this.updatePlacedBuildings(this.world.gameplay.placedBuildings.filter((building) =>
-      building.id !== selectedBuilding.id,
-    ));
+    const production = removeBuildingProductionState(
+      this.world.gameplay.production,
+      selectedBuilding.id,
+      selectedBuilding.definitionId,
+    );
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings.filter((building) => building.id !== selectedBuilding.id),
+      production,
+    );
     this.placementMessage = `Removed the selected ${getBuildingLabel(selectedBuilding.definitionId)}.`;
     if (this.activeTool !== 'select' && this.selectedCell) {
       this.updatePlacementPreview(this.selectedCell);
@@ -535,6 +772,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   private selectCell(cell: CellCoordinate): void {
     this.selectedCell = { x: cell.x, y: cell.y };
+    this.warehouseSelection = this.selectedMineProduction?.assignedWarehouseId ?? '';
     this.gameScene?.setSelectedCell(this.selectedCell);
   }
 
@@ -592,7 +830,18 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       origin: { x: origin.x, y: origin.y },
       rotationQuarterTurns: 0,
     };
-    this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building]);
+    let production = this.world.gameplay.production;
+    if (definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID) {
+      const binding = this.findMineBinding(building);
+      if (!binding) {
+        this.placementMessage = `Cannot place ${label}: the shaft must reach a mineral deposit.`;
+        return;
+      }
+      production = addMineProductionState(production, building, binding);
+    } else if (definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID) {
+      production = addWarehouseProductionState(production, building.id);
+    }
+    this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building], production);
     this.selectCell(origin);
     this.placementMessage = `Placed ${label} at ${origin.x}, ${origin.y}.`;
     this.placementPreview = null;
@@ -606,7 +855,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     if (!this.world) {
       throw new Error('Cannot validate placement without an active world.');
     }
-    return validateBuildingPlacement({
+    const validation = validateBuildingPlacement({
       dimensions: this.getGridDimensions(),
       mapData: this.world.map.authoritativeData,
       definitions: this.constructionDefinitions,
@@ -614,6 +863,39 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       definitionId,
       origin,
       rotationQuarterTurns: 0,
+    });
+    if (!validation.valid || definitionId !== VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID) {
+      return validation;
+    }
+    const candidate: PlacedBuildingState = {
+      id: 'placement-preview',
+      definitionId,
+      origin: { x: origin.x, y: origin.y },
+      rotationQuarterTurns: 0,
+    };
+    if (this.findMineBinding(candidate)) {
+      return validation;
+    }
+    return {
+      ...validation,
+      valid: false,
+      failures: [...validation.failures, { code: 'missing-mineral-deposit' }],
+    };
+  }
+
+  private findMineBinding(building: PlacedBuildingState) {
+    if (!this.world) {
+      return null;
+    }
+    const definition = this.constructionDefinitions.get(building.definitionId);
+    if (!definition) {
+      return null;
+    }
+    return findMineDepositBinding({
+      mapData: this.world.map.authoritativeData,
+      dimensions: this.getGridDimensions(),
+      building,
+      definition,
     });
   }
 
@@ -626,6 +908,125 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     }
   }
 
+  focusSelectedMineralDeposit(): void {
+    if (!this.world || !this.mineralDepositSelection) {
+      return;
+    }
+    const depositId = Number(this.mineralDepositSelection);
+    const deposit = this.mineralDeposits.find((candidate) => candidate.id === depositId);
+    if (!deposit) {
+      return;
+    }
+    const origin = this.findMineOriginForDeposit(deposit);
+    if (!origin) {
+      this.placementPreview = null;
+      this.placementMessage = `No buildable 15×6 mine placement reaches deposit #${deposit.id}.`;
+      this.gameScene?.setPlacementPreview(null);
+      return;
+    }
+    this.activeTool = 'mine';
+    this.selectCell(origin);
+    this.gameScene?.focusCell(origin);
+    this.updatePlacementPreview(origin);
+  }
+
+  prepareSelectedMineralDepositPlacement(): boolean {
+    if (!this.world || !this.mineralDepositSelection) {
+      return false;
+    }
+    const depositId = Number(this.mineralDepositSelection);
+    const deposit = this.mineralDeposits.find((candidate) => candidate.id === depositId);
+    if (!deposit) {
+      return false;
+    }
+    const origin = this.findMineOriginForDeposit(deposit);
+    if (!origin) {
+      this.placementPreview = null;
+      this.placementMessage = 'No buildable 15×6 mine placement reaches deposit #' + deposit.id + '.';
+      this.gameScene?.setPlacementPreview(null);
+      return false;
+    }
+    this.activeTool = 'mine';
+    this.selectCell(origin);
+    this.updatePlacementPreview(origin);
+    return true;
+  }
+
+  placeFocusedMine(): void {
+    if (this.activeTool !== 'mine' || !this.selectedCell || !this.placementPreview?.valid) {
+      return;
+    }
+    this.placeBuilding(this.selectedCell);
+  }
+
+  placeWarehouseAtStartingArea(): void {
+    if (!this.world || this.activeTool !== 'warehouse') {
+      return;
+    }
+    const origin = this.findStartingWarehouseOrigin();
+    if (!origin) {
+      this.placementMessage = 'No valid starting-area warehouse placement is available.';
+      return;
+    }
+    this.placeBuilding(origin);
+  }
+
+  private findStartingWarehouseOrigin(): CellCoordinate | null {
+    if (!this.world) {
+      return null;
+    }
+    const dimensions = this.getGridDimensions();
+    const startingCell = this.world.map.generationSummary.startingCell;
+    const center = {
+      x: startingCell % dimensions.width,
+      y: Math.floor(startingCell / dimensions.width),
+    };
+    for (let distance = 0; distance <= 24; distance += 1) {
+      for (let offsetY = -distance; offsetY <= distance; offsetY += 1) {
+        for (let offsetX = -distance; offsetX <= distance; offsetX += 1) {
+          if (Math.max(Math.abs(offsetX), Math.abs(offsetY)) !== distance) {
+            continue;
+          }
+          const origin = { x: center.x - 7 + offsetX, y: center.y - 3 + offsetY };
+          if (this.validateBuilding(VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID, origin).valid) {
+            return origin;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private findMineOriginForDeposit(
+    deposit: WorldSessionData['map']['authoritativeData']['deposits'][number],
+  ): CellCoordinate | null {
+    const width = this.getGridDimensions().width;
+    const center = { x: deposit.centerCell % width, y: Math.floor(deposit.centerCell / width) };
+    for (let distance = 0; distance <= 2; distance += 1) {
+      for (let offsetY = -distance; offsetY <= distance; offsetY += 1) {
+        for (let offsetX = -distance; offsetX <= distance; offsetX += 1) {
+          if (Math.max(Math.abs(offsetX), Math.abs(offsetY)) !== distance) {
+            continue;
+          }
+          const origin = { x: center.x - 12 + offsetX, y: center.y - 3 + offsetY };
+          const validation = this.validateBuilding(
+            VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+            origin,
+          );
+          if (validation.valid && this.findMineBinding({
+            id: 'placement-preview',
+            definitionId: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+            origin,
+            rotationQuarterTurns: 0,
+          })?.deposit.id === deposit.id) {
+            return origin;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   private getActiveDefinitionId(): string {
     if (this.activeTool === 'mine') {
       return VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID;
@@ -636,13 +1037,33 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     throw new Error('Select mode does not have an active building definition.');
   }
 
-  private updatePlacedBuildings(placedBuildings: readonly PlacedBuildingState[]): void {
+  formatMineralKind(kind: MineProductionState['resourceKind']): string {
+    switch (kind) {
+      case 'iron-ore':
+        return 'Iron ore';
+      case 'copper-ore':
+        return 'Copper ore';
+      case 'stone':
+        return 'Stone';
+    }
+  }
+
+  private updatePlacedBuildings(
+    placedBuildings: readonly PlacedBuildingState[],
+    production = this.world?.gameplay.production,
+  ): void {
     if (!this.world) {
       return;
     }
     this.world = createUpdatedWorldSession({
       ...this.world,
-      gameplay: { placedBuildings },
+      gameplay: {
+        placedBuildings,
+        production: reconcileMineralProductionState(
+          production ?? this.world.gameplay.production,
+          placedBuildings,
+        ),
+      },
     });
     this.sessionRuntime.setActiveWorld(this.world);
     this.syncConstructionVisuals();
@@ -673,6 +1094,43 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       width: this.world?.map.configuration.width ?? 1,
       height: this.world?.map.configuration.height ?? 1,
     };
+  }
+
+  readSelectValue(event: Event): string {
+    return (event.target as HTMLSelectElement).value;
+  }
+
+  assignSelectedMineWarehouse(): void {
+    const selectedMine = this.selectedMineProduction;
+    if (!selectedMine || !this.world) {
+      return;
+    }
+    const warehouseId = this.warehouseSelection || null;
+    const production = assignMineWarehouse(
+      this.world.gameplay.production,
+      selectedMine.mineBuildingId,
+      warehouseId,
+    );
+    this.updatePlacedBuildings(this.world.gameplay.placedBuildings, production);
+    this.placementMessage = warehouseId
+      ? `Assigned ${selectedMine.mineBuildingId} to ${warehouseId}.`
+      : `Unassigned ${selectedMine.mineBuildingId}.`;
+  }
+
+  runSimulationTick(): void {
+    if (!this.world || this.isSaving) {
+      return;
+    }
+    const result = runMineralProductionTick(
+      this.world.gameplay.production,
+      this.world.gameplay.placedBuildings,
+    );
+    this.updatePlacedBuildings(this.world.gameplay.placedBuildings, result.production);
+    this.placementMessage = result.delivered > 0
+      ? `Tick ${result.production.tick}: delivered ${result.delivered} mineral units.`
+      : result.buffered > 0
+        ? `Tick ${result.production.tick}: ${result.buffered} mineral units buffered.`
+        : `Tick ${result.production.tick}: no mineral output available.`;
   }
 
   async leaveWorld(): Promise<void> {
@@ -784,6 +1242,8 @@ function getPlacementFailureMessage(validation: PlacementValidationResult): stri
       return 'the terrain is too steep';
     case 'occupied':
       return 'the footprint is occupied';
+    case 'missing-mineral-deposit':
+      return 'the mine shaft must reach an iron, copper, or stone deposit';
     default:
       return 'the selected location is invalid';
   }

@@ -112,6 +112,70 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     expect(browserErrors.pageErrors).toEqual([]);
   });
 
+  test('transfers the selected mineral to an explicitly assigned warehouse and persists it', async ({ page }) => {
+    await prepareInitialWorld(page);
+    await page.getByRole('button', { name: /Accept World/ }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await waitForStreamingSettled(page);
+
+    await page.getByRole('button', { name: 'Warehouse', exact: true }).click();
+    await page.getByTestId('place-starting-warehouse').click();
+    await expect(page.locator('.placement-message')).toContainText('Placed arcaded warehouse');
+
+    await page.getByRole('button', { name: 'Mine', exact: true }).click();
+    const depositSelect = page.getByLabel('Mineral deposit target');
+    await expect(depositSelect.locator('option')).toHaveCount(20);
+    const mineDepositId = '3';
+    await depositSelect.selectOption(mineDepositId);
+    await page.getByTestId('prepare-mine-deposit').click();
+    await expect(page.locator('.placement-message')).toContainText('Valid placement');
+    await page.getByTestId('place-focused-mine').click();
+    await expect(page.getByTestId('selected-mine-production')).toBeVisible();
+
+    const mineResource = await page.getByTestId('mine-resource').textContent();
+    const mineDeposit = await page.getByTestId('mine-deposit').textContent();
+    expect(mineDeposit).toContain(`#${mineDepositId}`);
+
+    const warehouseDestination = page.getByLabel('Warehouse destination');
+    const warehouseIds = await warehouseDestination.locator('option').evaluateAll((options) =>
+      options
+        .map((option) => (option as HTMLOptionElement).value)
+        .filter((value) => value.length > 0),
+    );
+    expect(warehouseIds.length).toBe(1);
+    await warehouseDestination.selectOption(warehouseIds[0]);
+    await page.getByRole('button', { name: 'Assign Warehouse', exact: true }).click();
+    await page.getByTestId('run-production-tick').click();
+    await expect(page.getByTestId('production-tick')).toContainText('Simulation tick: 1');
+    await expect(page.getByTestId('mine-produced-total')).toContainText('10');
+    await expect(page.getByTestId('mine-delivered-total')).toContainText('10');
+    await expect(page.getByTestId('mine-output-buffer')).toContainText('0');
+
+    const resourceSuffix = mineResource?.includes('Iron')
+      ? 'iron-ore'
+      : mineResource?.includes('Copper')
+        ? 'copper-ore'
+        : 'stone';
+    const expectedInventoryTestId = `warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`;
+
+    await page.getByRole('button', { name: 'Save World', exact: true }).click();
+    await page.getByLabel('Save name').fill('Generic Mine Transfer');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.save-note')).toContainText('Saved Generic Mine Transfer');
+
+    await page.getByRole('button', { name: 'Leave World', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Build a beautiful industrial region.' })).toBeVisible();
+    await page.getByRole('button', { name: /Load Save/ }).click();
+    await expect(page.getByRole('heading', { name: 'Load Save' })).toBeVisible();
+    const savedRow = page.locator('.save-row').filter({ hasText: 'Generic Mine Transfer' });
+    await expect(savedRow).toBeVisible();
+    await savedRow.getByRole('button', { name: 'Load', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+
+    await expect(page.getByTestId('warehouse-inventory-list')).toBeVisible();
+    await expect(page.getByTestId(expectedInventoryTestId)).toContainText('10');
+  });
+
   test('locks generation input and exercises exploration controls', async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
     await prepareDeterministicWorld(page);

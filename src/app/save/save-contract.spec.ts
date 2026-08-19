@@ -155,7 +155,7 @@ describe('save contract', () => {
     ];
     const saveGame = createSaveGame(
       'save-005',
-      { ...world, gameplay: { placedBuildings } },
+      { ...world, gameplay: { ...world.gameplay, placedBuildings } },
       'Placed Buildings',
       'manual',
     );

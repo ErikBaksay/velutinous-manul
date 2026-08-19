@@ -3,13 +3,17 @@ import {
   DepositSource,
   MapConfig,
   MapSummary,
+  MineralResourceKind,
+  MINERAL_RESOURCE_KINDS,
   RESOURCE_KINDS,
   ResourceKind,
 } from '../map/map-types';
 import {
+  createEmptyMineralProductionState,
   createFallbackImportedSlotName,
   createUpdatedWorldSession,
   LegacySaveGame,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V2,
   SaveGame,
   SaveSlotKind,
   SAVE_GAME_FORMAT,
@@ -105,12 +109,13 @@ export function parsePortableSaveFile(content: string): SaveGame {
       `This save uses schema version ${schemaVersion}, but this game supports version ${SAVE_GAME_SCHEMA_VERSION}.`,
     );
   }
-  if (schemaVersion !== 1 && schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
+      schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError(`Save schema version ${schemaVersion} is not supported.`);
   }
 
   const saveId = assertNonEmptyString(envelope['saveId'], 'The save ID is missing or invalid.');
-  const world = decodeWorld(envelope['world']);
+  const world = decodeWorld(envelope['world'], schemaVersion === SAVE_GAME_SCHEMA_VERSION);
 
   if (schemaVersion === 1) {
     const legacy: LegacySaveGame = {
@@ -147,13 +152,15 @@ export function validateSaveGame(value: unknown): SaveGame {
   if (save['format'] !== SAVE_GAME_FORMAT) {
     throw new SaveValidationError('The stored save has an invalid format.');
   }
-  if (save['schemaVersion'] !== SAVE_GAME_SCHEMA_VERSION) {
+  const schemaVersion = save['schemaVersion'];
+  if (schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
+      schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError('The stored save uses an unsupported schema version.');
   }
   const saveId = assertNonEmptyString(save['saveId'], 'The stored save ID is invalid.');
   const slotName = assertNonEmptyString(save['slotName'], 'The stored save name is invalid.');
   const slotKind = assertSlotKind(save['slotKind']);
-  const world = validateWorld(save['world']);
+  const world = validateWorld(save['world'], schemaVersion === SAVE_GAME_SCHEMA_VERSION);
   return {
     format: SAVE_GAME_FORMAT,
     schemaVersion: SAVE_GAME_SCHEMA_VERSION,
@@ -195,7 +202,7 @@ function encodeWorld(world: WorldSession): PortableWorldSession {
   };
 }
 
-function decodeWorld(value: unknown): WorldSession {
+function decodeWorld(value: unknown, includeProduction: boolean): WorldSession {
   const raw = asRecord(value, 'The save world is missing or invalid.');
   const map = asRecord(raw['map'], 'The save map is missing or invalid.');
   const configuration = decodeMapConfig(map['configuration']);
@@ -213,12 +220,12 @@ function decodeWorld(value: unknown): WorldSession {
       generationSummary,
       authoritativeData,
     },
-    gameplay: decodeGameplay(raw['gameplay']),
+    gameplay: decodeGameplay(raw['gameplay'], includeProduction),
   };
-  return validateWorld(world);
+  return validateWorld(world, includeProduction);
 }
 
-function validateWorld(value: unknown): WorldSession {
+function validateWorld(value: unknown, includeProduction: boolean): WorldSession {
   const raw = asRecord(value, 'The world session is missing or invalid.');
   const map = asRecord(raw['map'], 'The world map is missing or invalid.');
   const configuration = validateMapConfig(map['configuration']);
@@ -236,7 +243,7 @@ function validateWorld(value: unknown): WorldSession {
       generationSummary,
       authoritativeData,
     },
-    gameplay: validateGameplay(raw['gameplay']),
+    gameplay: validateGameplay(raw['gameplay'], includeProduction),
   };
 }
 
@@ -369,11 +376,11 @@ function validateAuthoritativeMapData(
   };
 }
 
-function decodeGameplay(value: unknown): WorldSession['gameplay'] {
-  return validateGameplay(value);
+function decodeGameplay(value: unknown, includeProduction: boolean): WorldSession['gameplay'] {
+  return validateGameplay(value, includeProduction);
 }
 
-function validateGameplay(value: unknown): WorldSession['gameplay'] {
+function validateGameplay(value: unknown, includeProduction: boolean): WorldSession['gameplay'] {
   const raw = asRecord(value, 'The gameplay state is missing or invalid.');
   if (!Array.isArray(raw['placedBuildings'])) {
     throw new SaveValidationError('The placed-building state is invalid.');
@@ -400,6 +407,89 @@ function validateGameplay(value: unknown): WorldSession['gameplay'] {
           y: assertInteger(origin['y'], `Placed building ${index} Y coordinate is invalid.`),
         },
         rotationQuarterTurns: rotation as 0 | 1 | 2 | 3,
+      };
+    }),
+    production: includeProduction
+      ? validateMineralProductionState(raw['production'])
+      : createEmptyMineralProductionState(),
+  };
+}
+
+function validateMineralProductionState(value: unknown): WorldSession['gameplay']['production'] {
+  const raw = asRecord(value, 'The mineral production state is missing or invalid.');
+  const tick = assertNonNegativeInteger(raw['tick'], 'The production tick is invalid.');
+  if (!Array.isArray(raw['deposits'])) {
+    throw new SaveValidationError('The production deposit state is invalid.');
+  }
+  if (!Array.isArray(raw['mines'])) {
+    throw new SaveValidationError('The production mine state is invalid.');
+  }
+  if (!Array.isArray(raw['warehouses'])) {
+    throw new SaveValidationError('The production warehouse state is invalid.');
+  }
+  if (!Array.isArray(raw['transfers'])) {
+    throw new SaveValidationError('The production transfer state is invalid.');
+  }
+
+  return {
+    tick,
+    deposits: raw['deposits'].map((deposit, index) => {
+      const item = asRecord(deposit, `Production deposit ${index} is invalid.`);
+      return {
+        depositId: assertNonNegativeInteger(item['depositId'], `Production deposit ${index} ID is invalid.`),
+        resourceKind: assertMineralResourceKind(item['resourceKind'], `Production deposit ${index} resource is invalid.`),
+        remainingCapacity: assertNonNegativeNumber(
+          item['remainingCapacity'],
+          `Production deposit ${index} capacity is invalid.`,
+        ),
+      };
+    }),
+    mines: raw['mines'].map((mine, index) => {
+      const item = asRecord(mine, `Production mine ${index} is invalid.`);
+      const assignedWarehouseId = item['assignedWarehouseId'];
+      if (assignedWarehouseId !== null && typeof assignedWarehouseId !== 'string') {
+        throw new SaveValidationError(`Production mine ${index} warehouse assignment is invalid.`);
+      }
+      return {
+        mineBuildingId: assertNonEmptyString(item['mineBuildingId'], `Production mine ${index} ID is invalid.`),
+        depositId: assertNonNegativeInteger(item['depositId'], `Production mine ${index} deposit is invalid.`),
+        resourceKind: assertMineralResourceKind(item['resourceKind'], `Production mine ${index} resource is invalid.`),
+        outputBuffer: assertNonNegativeNumber(item['outputBuffer'], `Production mine ${index} buffer is invalid.`),
+        assignedWarehouseId,
+        producedTotal: assertNonNegativeNumber(item['producedTotal'], `Production mine ${index} production total is invalid.`),
+        deliveredTotal: assertNonNegativeNumber(item['deliveredTotal'], `Production mine ${index} delivery total is invalid.`),
+      };
+    }),
+    warehouses: raw['warehouses'].map((warehouse, index) => {
+      const item = asRecord(warehouse, `Production warehouse ${index} is invalid.`);
+      const quantities = asRecord(item['quantities'], `Production warehouse ${index} inventory is invalid.`);
+      return {
+        warehouseBuildingId: assertNonEmptyString(
+          item['warehouseBuildingId'],
+          `Production warehouse ${index} ID is invalid.`,
+        ),
+        quantities: Object.fromEntries(MINERAL_RESOURCE_KINDS.map((kind) => [
+          kind,
+          assertNonNegativeNumber(quantities[kind], `Production warehouse ${index} quantity is invalid.`),
+        ])) as WorldSession['gameplay']['production']['warehouses'][number]['quantities'],
+      };
+    }),
+    transfers: raw['transfers'].map((transfer, index) => {
+      const item = asRecord(transfer, `Production transfer ${index} is invalid.`);
+      const status = item['status'];
+      if (status !== 'pending' && status !== 'delivered' && status !== 'cancelled') {
+        throw new SaveValidationError(`Production transfer ${index} status is invalid.`);
+      }
+      return {
+        id: assertNonEmptyString(item['id'], `Production transfer ${index} ID is invalid.`),
+        sourceMineId: assertNonEmptyString(item['sourceMineId'], `Production transfer ${index} source is invalid.`),
+        destinationWarehouseId: assertNonEmptyString(
+          item['destinationWarehouseId'],
+          `Production transfer ${index} destination is invalid.`,
+        ),
+        resourceKind: assertMineralResourceKind(item['resourceKind'], `Production transfer ${index} resource is invalid.`),
+        amount: assertPositiveNumber(item['amount'], `Production transfer ${index} amount is invalid.`),
+        status,
       };
     }),
   };
@@ -551,6 +641,29 @@ function assertFiniteNumber(value: unknown, message: string): number {
     throw new SaveValidationError(message);
   }
   return value;
+}
+
+function assertNonNegativeNumber(value: unknown, message: string): number {
+  const numberValue = assertFiniteNumber(value, message);
+  if (numberValue < 0) {
+    throw new SaveValidationError(message);
+  }
+  return numberValue;
+}
+
+function assertPositiveNumber(value: unknown, message: string): number {
+  const numberValue = assertFiniteNumber(value, message);
+  if (numberValue <= 0) {
+    throw new SaveValidationError(message);
+  }
+  return numberValue;
+}
+
+function assertMineralResourceKind(value: unknown, message: string): MineralResourceKind {
+  if (!(MINERAL_RESOURCE_KINDS as readonly unknown[]).includes(value)) {
+    throw new SaveValidationError(message);
+  }
+  return value as MineralResourceKind;
 }
 
 function assertInteger(value: unknown, message: string): number {

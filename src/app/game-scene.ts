@@ -225,6 +225,14 @@ export class GameScene {
     this.cameraController.setNavigationEnabled(enabled);
   }
 
+  focusCell(cell: CellCoordinate): void {
+    if (!this.mapData) {
+      return;
+    }
+    const center = cellToWorldCenter(cell, MAP_DIMENSIONS);
+    this.cameraController.reset(center.x, center.z);
+  }
+
   setCellInteractionCallbacks(
     callbacks: GameSceneCellInteractionCallbacks | null,
   ): void {

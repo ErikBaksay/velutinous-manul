@@ -44,6 +44,14 @@ export type ResourceKind =
   | 'timber'
   | 'fertile-land';
 
+export type MineralResourceKind = 'iron-ore' | 'copper-ore' | 'stone';
+
+export const MINERAL_RESOURCE_KINDS: readonly MineralResourceKind[] = [
+  'iron-ore',
+  'copper-ore',
+  'stone',
+];
+
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'iron-ore',
   'copper-ore',
@@ -88,7 +96,7 @@ export const MAP_FLAG_CODES = Object.freeze({
 
 export interface DepositSource {
   id: number;
-  kind: 'iron-ore' | 'copper-ore' | 'stone';
+  kind: MineralResourceKind;
   centerCell: number;
   radius: number;
   strength: number;

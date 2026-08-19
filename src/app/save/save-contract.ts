@@ -3,11 +3,13 @@ import {
   MapConfig,
   MapPreset,
   MapSummary,
+  MineralResourceKind,
 } from '../map/map-types';
 
 export const SAVE_GAME_FORMAT = 'velutinous-manul-save' as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION = 1 as const;
-export const SAVE_GAME_SCHEMA_VERSION = 2 as const;
+export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 = 2 as const;
+export const SAVE_GAME_SCHEMA_VERSION = 3 as const;
 export const AUTOSAVE_ID = 'autosave' as const;
 export const AUTOSAVE_NAME = 'Autosave' as const;
 
@@ -27,8 +29,49 @@ export interface PlacedBuildingState {
   readonly rotationQuarterTurns: QuarterTurn;
 }
 
+export type TransferStatus = 'pending' | 'delivered' | 'cancelled';
+
+export interface DepositProductionState {
+  readonly depositId: number;
+  readonly resourceKind: MineralResourceKind;
+  readonly remainingCapacity: number;
+}
+
+export interface MineProductionState {
+  readonly mineBuildingId: string;
+  readonly depositId: number;
+  readonly resourceKind: MineralResourceKind;
+  readonly outputBuffer: number;
+  readonly assignedWarehouseId: string | null;
+  readonly producedTotal: number;
+  readonly deliveredTotal: number;
+}
+
+export interface WarehouseInventoryState {
+  readonly warehouseBuildingId: string;
+  readonly quantities: Readonly<Record<MineralResourceKind, number>>;
+}
+
+export interface TransferOrder {
+  readonly id: string;
+  readonly sourceMineId: string;
+  readonly destinationWarehouseId: string;
+  readonly resourceKind: MineralResourceKind;
+  readonly amount: number;
+  readonly status: TransferStatus;
+}
+
+export interface MineralProductionState {
+  readonly tick: number;
+  readonly deposits: readonly DepositProductionState[];
+  readonly mines: readonly MineProductionState[];
+  readonly warehouses: readonly WarehouseInventoryState[];
+  readonly transfers: readonly TransferOrder[];
+}
+
 export interface GameplayState {
   readonly placedBuildings: readonly PlacedBuildingState[];
+  readonly production: MineralProductionState;
 }
 
 export interface WorldMapSnapshot {
@@ -97,6 +140,7 @@ export function createWorldSession(
     },
     gameplay: {
       placedBuildings: [],
+      production: createEmptyMineralProductionState(),
     },
   };
 }
@@ -154,10 +198,44 @@ export function createUpdatedWorldSession(
         ...building,
         origin: { ...building.origin },
       })),
+      production: cloneMineralProductionState(world.gameplay.production),
     },
   };
 }
 
 export function createFallbackImportedSlotName(world: WorldSession): string {
   return `Imported World — ${world.map.configuration.seed}`;
+}
+
+export function createEmptyMineralInventory(): Readonly<Record<MineralResourceKind, number>> {
+  return {
+    'iron-ore': 0,
+    'copper-ore': 0,
+    stone: 0,
+  };
+}
+
+export function createEmptyMineralProductionState(): MineralProductionState {
+  return {
+    tick: 0,
+    deposits: [],
+    mines: [],
+    warehouses: [],
+    transfers: [],
+  };
+}
+
+export function cloneMineralProductionState(
+  production: MineralProductionState,
+): MineralProductionState {
+  return {
+    tick: production.tick,
+    deposits: production.deposits.map((deposit) => ({ ...deposit })),
+    mines: production.mines.map((mine) => ({ ...mine })),
+    warehouses: production.warehouses.map((warehouse) => ({
+      warehouseBuildingId: warehouse.warehouseBuildingId,
+      quantities: { ...warehouse.quantities },
+    })),
+    transfers: production.transfers.map((transfer) => ({ ...transfer })),
+  };
 }

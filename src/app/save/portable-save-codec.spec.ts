@@ -5,6 +5,7 @@ import {
   RESOURCE_KINDS,
 } from '../map/map-types';
 import {
+  createEmptyMineralProductionState,
   createSaveGame,
   createWorldSession,
   SAVE_GAME_SCHEMA_VERSION,
@@ -75,7 +76,7 @@ describe('portable save codec', () => {
     const content = serializeSaveGame(
       createSaveGame(
         'placed-building-save',
-        { ...world, gameplay: { placedBuildings } },
+        { ...world, gameplay: { ...world.gameplay, placedBuildings } },
         'Placed Buildings',
         'manual',
       ),
@@ -84,6 +85,52 @@ describe('portable save codec', () => {
     const parsed = parsePortableSaveFile(content);
 
     expect(parsed.world.gameplay.placedBuildings).toEqual(placedBuildings);
+  });
+
+  it('round-trips generic mineral production state', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'production-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_104,
+    );
+    const production = {
+      ...createEmptyMineralProductionState(),
+      tick: 3,
+      deposits: [{ depositId: 7, resourceKind: 'copper-ore' as const, remainingCapacity: 41 }],
+      mines: [{
+        mineBuildingId: 'velutinous-manul-placeholder-mine-1',
+        depositId: 7,
+        resourceKind: 'copper-ore' as const,
+        outputBuffer: 2,
+        assignedWarehouseId: 'velutinous-manul-warehouse-1',
+        producedTotal: 32,
+        deliveredTotal: 30,
+      }],
+      warehouses: [{
+        warehouseBuildingId: 'velutinous-manul-warehouse-1',
+        quantities: { 'iron-ore': 0, 'copper-ore': 30, stone: 0 },
+      }],
+      transfers: [{
+        id: 'transfer-3-velutinous-manul-placeholder-mine-1',
+        sourceMineId: 'velutinous-manul-placeholder-mine-1',
+        destinationWarehouseId: 'velutinous-manul-warehouse-1',
+        resourceKind: 'copper-ore' as const,
+        amount: 30,
+        status: 'delivered' as const,
+      }],
+    };
+    const parsed = parsePortableSaveFile(serializeSaveGame(createSaveGame(
+      'production-save',
+      { ...world, gameplay: { ...world.gameplay, production } },
+      'Production World',
+      'manual',
+    )));
+
+    expect(parsed.world.gameplay.production).toEqual(production);
   });
 
   it('migrates a version-one portable file to a named manual save', () => {
@@ -110,9 +157,37 @@ describe('portable save codec', () => {
 
     const parsed = parsePortableSaveFile(JSON.stringify(current));
 
-    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
     expect(parsed.slotKind).toBe('manual');
     expect(parsed.slotName).toBe('Imported World — VELUTINOUS-MANUL-START-001');
+  });
+
+  it('migrates a version-two portable file with empty production state', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'legacy-v2-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_105,
+    );
+    const current = JSON.parse(serializeSaveGame({
+      format: 'velutinous-manul-save',
+      schemaVersion: SAVE_GAME_SCHEMA_VERSION,
+      saveId: 'legacy-v2-save',
+      slotName: 'Legacy v2 World',
+      slotKind: 'manual',
+      world,
+    })) as Record<string, any>;
+    current['schemaVersion'] = 2;
+    delete current['world']['gameplay']['production'];
+
+    const parsed = parsePortableSaveFile(JSON.stringify(current));
+
+    expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(parsed.slotName).toBe('Legacy v2 World');
+    expect(parsed.world.gameplay.production).toEqual(createEmptyMineralProductionState());
   });
 
   it('rejects future schemas, malformed base64, and wrong typed-array lengths', () => {
@@ -151,6 +226,20 @@ describe('portable save codec', () => {
     })) as Record<string, any>;
     valid['world']['map']['authoritativeData']['moisture']['length'] = 3;
     expect(() => parsePortableSaveFile(JSON.stringify(valid))).toThrow(SaveValidationError);
+
+    const invalidProduction = JSON.parse(serializeSaveGame({
+      format: 'velutinous-manul-save',
+      schemaVersion: SAVE_GAME_SCHEMA_VERSION,
+      saveId: 'invalid-save-3',
+      slotName: 'Invalid World',
+      slotKind: 'manual',
+      world,
+    })) as Record<string, any>;
+    invalidProduction['world']['gameplay']['production']['warehouses'] = [{
+      warehouseBuildingId: 'warehouse-1',
+      quantities: { 'iron-ore': -1, 'copper-ore': 0, stone: 0 },
+    }];
+    expect(() => parsePortableSaveFile(JSON.stringify(invalidProduction))).toThrow(SaveValidationError);
   });
 });
 
