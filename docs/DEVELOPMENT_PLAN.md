@@ -734,3 +734,9 @@ The second revised sunset concept is the approved visual target. It defines the 
 - **Approved rule:** Mineral deposits are unlimited gameplay sources. Mines continue extracting 10 units per simulation tick indefinitely; transport capacity and road access remain the only constraints on delivery.
 - **Compatibility:** The existing serialized `remainingCapacity` field is retained so older saves and map metadata remain readable, but production no longer decrements or consults it as a limiter.
 - **UI/test status:** The mine panel now reports `Deposit supply: Unlimited`, finite-capacity/exhaustion expectations were replaced with continuous-production coverage, and old saves with zero legacy capacity continue producing normally.
+
+### 2026-08-28 — Courier van lane fit and routing
+
+- **Decision:** Keep the existing road geometry, reduce the runtime courier van scale to `0.18`, and derive a right-hand lane path from each saved route using an offset of one quarter of the road surface width.
+- **Rejected alternatives:** Centerline-only placement would not provide directional lane readability; widening the established road footprint would change the existing road visual; a full traffic system with opposing vehicles and collision spacing is outside this focused presentation fix.
+- **Implementation boundary:** Lane offsets and corner joins are render-only. Transport simulation, route snapshots, save schema, road cells, delivery timing, and the authored Blender/GLB vehicle asset remain unchanged.

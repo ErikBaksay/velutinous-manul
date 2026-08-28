@@ -42,6 +42,13 @@ import {
   type RoadGradeProfile,
 } from './construction/road-geometry';
 import { clientPointToNormalizedDeviceCoordinate } from './construction/selection';
+import {
+  COURIER_VAN_LANE_OFFSET,
+  COURIER_VAN_RENDER_SCALE,
+  createRightHandLanePath,
+  getRightHandLanePose,
+} from './vehicle-lane-geometry';
+import type { VehicleLanePoint } from './vehicle-lane-geometry';
 
 export interface GameSceneCellInteractionCallbacks {
   readonly onCellHover: (cell: CellCoordinate) => void;
@@ -74,7 +81,6 @@ const MAP_DIMENSIONS = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
 const MINE_ASSET_ID = 'mine_shaft_house_lod0';
 const WAREHOUSE_ASSET_ID = 'warehouse_lod0';
 const BUILDING_LOD_VISIBLE_HEIGHT = 58;
-const COURIER_VAN_RENDER_SCALE = 0.4;
 const COURIER_VAN_VISUAL_INTERPOLATION_SECONDS = 0.1;
 
 export class GameScene {
@@ -484,9 +490,14 @@ export class GameScene {
         nextTransitions.set(vehicle.id, existing);
         continue;
       }
+      const from = existing?.to ?? vehicle;
       nextTransitions.set(vehicle.id, {
-        from: existing?.to ?? vehicle,
+        from,
         to: vehicle,
+        fromLanePath: existing?.toLanePath ?? createCourierVanLanePath(from),
+        toLanePath: existing && areCourierVanRoutesEqual(existing.to, vehicle)
+          ? existing.toLanePath
+          : createCourierVanLanePath(vehicle),
         startedAt: now,
       });
     }
@@ -670,12 +681,14 @@ export class GameScene {
         this.roadStates,
         roadGrades,
         transition.from,
+        transition.fromLanePath,
       );
       const toPose = getCourierVanPose(
         this.mapData,
         this.roadStates,
         roadGrades,
         transition.to,
+        transition.toLanePath,
       );
       visual.position.lerpVectors(fromPose.position, toPose.position, interpolation);
       visual.rotation.y = interpolateAngle(fromPose.heading, toPose.heading, interpolation);
@@ -1124,6 +1137,8 @@ interface CourierVanPose {
 interface CourierVanVisualTransition {
   readonly from: CourierVanState;
   readonly to: CourierVanState;
+  readonly fromLanePath: readonly VehicleLanePoint[];
+  readonly toLanePath: readonly VehicleLanePoint[];
   readonly startedAt: number;
 }
 
@@ -1147,6 +1162,24 @@ function areCourierVanStatesEqual(left: CourierVanState, right: CourierVanState)
   });
 }
 
+function areCourierVanRoutesEqual(left: CourierVanState, right: CourierVanState): boolean {
+  if (left.route.length !== right.route.length) {
+    return false;
+  }
+  return left.route.every((cell, index) => {
+    const other = right.route[index];
+    return other !== undefined && cell.x === other.x && cell.y === other.y;
+  });
+}
+
+function createCourierVanLanePath(vehicle: CourierVanState): readonly VehicleLanePoint[] {
+  return createRightHandLanePath(
+    vehicle.route,
+    COURIER_VAN_LANE_OFFSET,
+    (cell) => cellToWorldCenter(cell, MAP_DIMENSIONS),
+  );
+}
+
 function interpolateAngle(from: number, to: number, amount: number): number {
   const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
   return from + delta * amount;
@@ -1157,6 +1190,7 @@ function getCourierVanPose(
   roads: readonly RoadState[],
   roadGrades: ReadonlyMap<string, RoadGradeProfile>,
   vehicle: CourierVanState,
+  lanePath: readonly VehicleLanePoint[],
 ): CourierVanPose {
   const route = vehicle.route;
   const routeIndex = Math.min(Math.max(vehicle.routeIndex, 0), route.length - 1);
@@ -1169,21 +1203,17 @@ function getCourierVanPose(
   const travelProgress = vehicle.phase === 'enroute'
     ? THREE.MathUtils.clamp(vehicle.progress, 0, 1)
     : unloading ? 1 : 0;
-  const positionFrom = cellToWorldCenter(positionFromCell, MAP_DIMENSIONS);
-  const positionTo = cellToWorldCenter(positionToCell, MAP_DIMENSIONS);
-  const x = THREE.MathUtils.lerp(positionFrom.x, positionTo.x, travelProgress);
-  const z = THREE.MathUtils.lerp(positionFrom.z, positionTo.z, travelProgress);
   const currentElevation = getRoadOrTerrainElevation(mapData, roads, roadGrades, positionFromCell);
   const nextElevation = getRoadOrTerrainElevation(mapData, roads, roadGrades, positionToCell);
   const y = THREE.MathUtils.lerp(currentElevation, nextElevation, travelProgress) + 0.02;
-  const directionX = positionTo.x - positionFrom.x;
-  const directionZ = positionTo.z - positionFrom.z;
-  const heading = Math.abs(directionX) + Math.abs(directionZ) > Number.EPSILON
-    ? Math.atan2(directionZ, -directionX)
-    : 0;
+  const lanePose = getRightHandLanePose(
+    vehicle,
+    lanePath,
+    (cell) => cellToWorldCenter(cell, MAP_DIMENSIONS),
+  );
   return {
-    position: new THREE.Vector3(x, y, z),
-    heading,
+    position: new THREE.Vector3(lanePose.position.x, y, lanePose.position.z),
+    heading: lanePose.heading,
   };
 }
 
