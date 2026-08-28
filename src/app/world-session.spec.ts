@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import type { WorldSession as WorldSessionData } from './save/save-contract';
+import { createCellOccupancy } from './construction';
+import type { PlacedBuildingState, WorldSession as WorldSessionData } from './save/save-contract';
 import { SavePersistenceService } from './save/save-persistence';
 import { WorldSessionRuntime } from './session-runtime';
 import { WorldSession } from './world-session';
@@ -82,6 +83,35 @@ describe('WorldSession', () => {
     expect(saveNote.textContent).toContain('Autosave could not be completed');
     fixture.destroy();
   });
+
+  it('preserves the authoritative mine assignment when the select value is stale', () => {
+    const fixture = TestBed.createComponent(WorldSession);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    const world = createAssignedWorldStub();
+    component.world = world;
+
+    const internals = component as unknown as {
+      occupancy: ReturnType<typeof createCellOccupancy>['occupancy'];
+      constructionDefinitions: ReadonlyMap<string, unknown>;
+      selectCell(cell: { x: number; y: number }): void;
+      assignSelectedMineWarehouse(): void;
+    };
+    internals.occupancy = createCellOccupancy(
+      { width: 40, height: 24 },
+      world.gameplay.placedBuildings,
+      internals.constructionDefinitions as never,
+    ).occupancy;
+    internals.selectCell({ x: 1, y: 1 });
+    component.warehouseSelection = '';
+
+    expect(component.selectedWarehouseDestination).toBe('warehouse-1');
+    internals.assignSelectedMineWarehouse();
+
+    expect(component.world?.gameplay.production.mines[0]?.assignedWarehouseId).toBe('warehouse-1');
+    expect(component.warehouseSelection).toBe('warehouse-1');
+    fixture.destroy();
+  });
 });
 
 function createWorldStub(): WorldSessionData {
@@ -97,5 +127,52 @@ function createWorldStub(): WorldSessionData {
       },
     },
     gameplay: { placedBuildings: [] },
+  } as unknown as WorldSessionData;
+}
+
+function createAssignedWorldStub(): WorldSessionData {
+  const mine: PlacedBuildingState = {
+    id: 'mine-1',
+    definitionId: 'velutinous-manul-placeholder-mine',
+    origin: { x: 1, y: 1 },
+    rotationQuarterTurns: 0,
+  };
+  const warehouse: PlacedBuildingState = {
+    id: 'warehouse-1',
+    definitionId: 'velutinous-manul-warehouse',
+    origin: { x: 20, y: 1 },
+    rotationQuarterTurns: 0,
+  };
+  return {
+    sessionId: 'assigned-world-test',
+    createdAt: 1,
+    updatedAt: 1,
+    map: {
+      configuration: { seed: 'TEST-SEED', width: 40, height: 24 },
+    },
+    gameplay: {
+      placedBuildings: [mine, warehouse],
+      roads: [],
+      clearedCellIndices: [],
+      production: {
+        tick: 0,
+        deposits: [],
+        mines: [{
+          mineBuildingId: mine.id,
+          depositId: 1,
+          resourceKind: 'iron-ore',
+          outputBuffer: 0,
+          assignedWarehouseId: warehouse.id,
+          producedTotal: 0,
+          deliveredTotal: 0,
+        }],
+        warehouses: [{
+          warehouseBuildingId: warehouse.id,
+          quantities: { 'iron-ore': 0, 'copper-ore': 0, stone: 0 },
+        }],
+        transfers: [],
+      },
+      vehicles: [],
+    },
   } as unknown as WorldSessionData;
 }

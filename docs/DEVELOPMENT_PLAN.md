@@ -353,12 +353,12 @@ The separate pipeline and composed-scene alternatives were rejected because the 
 
 - Replace the iron-specific extraction model with one typed mineral model for iron ore, copper ore, and stone.
 - Bind the mine’s authored local resource anchor with quarter-turn conversion, one-cell Chebyshev extraction, nearest-deposit selection, and ID tie-breaking.
-- Add schema-v3 production state with shared deposit capacity, mine buffers and totals, typed warehouse inventories, transfer records, and a manual simulation tick.
+- Add schema-v3 production state with deposit bindings, mine buffers and totals, typed warehouse inventories, transfer records, and a manual simulation tick.
 - Preserve v1/v2 save compatibility, keep authoritative map deposits immutable, and clean up production state when mines or warehouses are removed.
 - Extend the world session with generic deposit binding information, explicit warehouse assignment, quantity test IDs, warehouse inventory views, and Run Tick controls.
 - Verify unit binding/production behavior, portable and IndexedDB migration/validation, application/e2e type checks, production build, and the deterministic browser transfer flow through save/reload.
 
-**Implementation status:** Implemented. The deterministic simulation uses 10 units per mine per tick, stable mine ordering, immediate full-buffer delivery to the explicitly assigned warehouse, and buffering when unassigned. Unit coverage includes all three mineral kinds, rotations, extraction radius, deterministic ties, shared capacity, exhaustion, buffering, explicit destinations, cleanup, and persistence/malformed-save cases. The browser scenario uses the deterministic world’s valid mineral deposit and verifies assignment, a tick, typed inventory, manual save, leave, load, and persisted quantity. The production build passes with the existing 11-byte global stylesheet budget warning.
+**Implementation status:** Implemented. The deterministic simulation uses 10 units per mine per tick from unlimited deposit sources, stable mine ordering, immediate full-buffer delivery to the explicitly assigned warehouse, and buffering when unassigned. Unit coverage includes all three mineral kinds, rotations, extraction radius, deterministic ties, continuous production from legacy zero-capacity state, buffering, explicit destinations, cleanup, and persistence/malformed-save cases. The browser scenario uses the deterministic world’s valid mineral deposit and verifies assignment, a tick, typed inventory, manual save, leave, load, and persisted quantity. The production build passes with the existing 11-byte global stylesheet budget warning.
 
 ### Milestone 11 — Construction-aware natural-item clearing
 
@@ -719,3 +719,18 @@ The second revised sunset concept is the approved visual target. It defines the 
 - **Important constraint:** `tools/blender/author_courier_van.py` clears and rebuilds the scene, so it must not be run after manual edits unless intentionally restarting from the procedural recipe. Normal collaboration uses `build_courier_van.py` and `render_courier_van_preview.py` against the saved `.blend`.
 - **Follow-up:** Any future scripted geometry change should be implemented as a targeted, non-destructive patch and validated against the existing stable object, marker, material, and bounds contract.
 - **Low-poly migration:** Replaced the Boolean-heavy generated body with a clean longitudinal cage intended for direct Blender editing. The migration retains the broad proportions, wheel arches, three primary material regions, wheels, root, and compatibility markers while intentionally removing fine exterior details for accurate manual reconstruction.
+
+### 2026-08-28 — Milestone 4 — Courier van transport slice
+
+- **Approved scope:** Integrate `courier_van.glb` as the first physical truck. Mines buffer extracted minerals, assigned mines dispatch capacity-10 vans, vans follow deterministic four-direction road routes at three cells per second, and warehouses receive cargo only on arrival.
+- **Approved exclusions:** No depot, battery/range, collision avoidance, lane traffic, turning animation, player fleet management, or additional vehicle types are included in this milestone. Vehicle visuals remain global scene objects rather than chunk-streamed objects.
+- **Persistence decision:** Bump saves from schema 5 to schema 6. Active van identity, transfer, cargo, route snapshot, progress, and phase are serialized through IndexedDB and portable saves; schema-5 saves migrate with no vehicles.
+- **Routing decision:** Building access is resolved from nearest adjacent perimeter road cells. Shortest four-direction BFS uses stable coordinate ordering, and active trips retain their route snapshot when roads change. Missing access or disconnected roads leave output buffered and visible as blocked transport.
+- **Simulation decision:** Authoritative transport advances on a 100 ms world-session timer with a 0.25 second elapsed-time clamp. Rendering interpolates the latest state independently; loading and unloading each dwell for 0.35 seconds.
+- **Milestone status:** Implemented. `npm run test:ci` passes 38 files and 151 tests; the full Playwright suite passes all 18 browser tests, including physical delivery and save/reload continuity. Application/spec/e2e TypeScript checks, `npm run build`, and `git diff --check` pass. The existing 11-byte component-CSS budget warning remains accepted; no files are staged, committed, or pushed by the assistant.
+
+### 2026-08-28 — Unlimited mineral deposits correction
+
+- **Approved rule:** Mineral deposits are unlimited gameplay sources. Mines continue extracting 10 units per simulation tick indefinitely; transport capacity and road access remain the only constraints on delivery.
+- **Compatibility:** The existing serialized `remainingCapacity` field is retained so older saves and map metadata remain readable, but production no longer decrements or consults it as a limiter.
+- **UI/test status:** The mine panel now reports `Deposit supply: Unlimited`, finite-capacity/exhaustion expectations were replaced with continuous-production coverage, and old saves with zero legacy capacity continue producing normally.

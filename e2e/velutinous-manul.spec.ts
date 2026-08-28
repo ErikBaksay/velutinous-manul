@@ -113,7 +113,7 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     expect(browserErrors.pageErrors).toEqual([]);
   });
 
-  test('transfers the selected mineral to an explicitly assigned warehouse and persists it', async ({ page }) => {
+  test('dispatches a courier van, delivers on arrival, and persists the transport state', async ({ page }) => {
     await prepareInitialWorld(page);
     await page.getByRole('button', { name: /Accept World/ }).click();
     await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
@@ -126,7 +126,36 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await page.getByRole('button', { name: 'Mine', exact: true }).click();
     const depositSelect = page.getByLabel('Mineral deposit target');
     await expect(depositSelect.locator('option')).toHaveCount(20);
-    const mineDepositId = '3';
+    const mineDepositId = await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: { getComponent?: (element: Element) => any };
+      }).ng;
+      const component = angular?.getComponent?.(document.querySelector('app-world-session')!);
+      const warehouse = component?.world?.gameplay?.placedBuildings
+        .find((building: any) => building.definitionId.includes('warehouse'));
+      if (!component || !warehouse) {
+        throw new Error('The browser transport flow could not locate the starting warehouse.');
+      }
+      const candidates = component.mineralDeposits
+        .map((deposit: any) => ({
+          id: deposit.id,
+          origin: component['findMineOriginForDeposit'](deposit),
+        }))
+        .filter((candidate: any) => candidate.origin)
+        .map((candidate: any) => ({
+          ...candidate,
+          distance: Math.abs(candidate.origin.x - warehouse.origin.x) +
+            Math.abs(candidate.origin.y - warehouse.origin.y),
+        }))
+        .sort((left: any, right: any) =>
+          left.distance - right.distance ||
+          left.id - right.id,
+        );
+      if (!candidates[0]) {
+        throw new Error('The browser transport flow could not find a buildable mineral deposit.');
+      }
+      return String((candidates.find((candidate: any) => candidate.distance >= 30) ?? candidates[0]).id);
+    });
     await depositSelect.selectOption(mineDepositId);
     await page.getByTestId('prepare-mine-deposit').click();
     await expect(page.locator('.placement-message')).toContainText('Valid placement');
@@ -146,11 +175,32 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     expect(warehouseIds.length).toBe(1);
     await warehouseDestination.selectOption(warehouseIds[0]);
     await page.getByRole('button', { name: 'Assign Warehouse', exact: true }).click();
+    await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: {
+          getComponent?: (element: Element) => any;
+          applyChanges?: (component: any) => void;
+        };
+      }).ng;
+      const host = document.querySelector('app-world-session');
+      const component = host && angular?.getComponent?.(host);
+      const mine = component?.world?.gameplay?.placedBuildings
+        .find((building: any) => building.definitionId.includes('mine'));
+      if (!component || !mine) {
+        throw new Error('The browser assignment flow could not locate the placed mine.');
+      }
+      component.selectTool();
+      component['selectCell']({ x: mine.origin.x, y: mine.origin.y });
+      angular?.applyChanges?.(component);
+    });
+    await expect(warehouseDestination).toHaveValue(warehouseIds[0]);
+    await expect(page.getByTestId('mine-assigned-warehouse')).toContainText(warehouseIds[0]);
     await page.getByTestId('run-production-tick').click();
     await expect(page.getByTestId('production-tick')).toContainText('Simulation tick: 1');
     await expect(page.getByTestId('mine-produced-total')).toContainText('10');
-    await expect(page.getByTestId('mine-delivered-total')).toContainText('10');
-    await expect(page.getByTestId('mine-output-buffer')).toContainText('0');
+    await expect(page.getByTestId('mine-delivered-total')).toContainText('0');
+    await expect(page.getByTestId('mine-output-buffer')).toContainText('10');
+    await expect(page.getByTestId('blocked-delivery-count')).toContainText('1');
 
     const resourceSuffix = mineResource?.includes('Iron')
       ? 'iron-ore'
@@ -159,10 +209,35 @@ test.describe('Velutinous Manul browser diagnostics', () => {
         : 'stone';
     const expectedInventoryTestId = `warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`;
 
+    await placeRoadRouteBetweenMineAndWarehouse(page);
+    await expect(page.getByTestId('active-van-count')).toContainText('1');
+    await expect(page.getByTestId('pending-delivery-count')).toContainText('1');
+
     await page.getByRole('button', { name: 'Save World', exact: true }).click();
     await page.getByLabel('Save name').fill('Generic Mine Transfer');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.locator('.save-note')).toContainText('Saved Generic Mine Transfer');
+
+    const savedVehicleCount = await page.evaluate(async () => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('velutinous-manul-saves');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const payloads = await new Promise<any[]>((resolve, reject) => {
+          const request = database.transaction('save-payload', 'readonly')
+            .objectStore('save-payload')
+            .getAll();
+          request.onsuccess = () => resolve(request.result as any[]);
+          request.onerror = () => reject(request.error);
+        });
+        return payloads.find((payload) => payload.slotName === 'Generic Mine Transfer')?.world.gameplay.vehicles.length ?? 0;
+      } finally {
+        database.close();
+      }
+    });
+    expect(savedVehicleCount).toBe(1);
 
     await page.getByRole('button', { name: 'Leave World', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Build a beautiful industrial region.' })).toBeVisible();
@@ -174,7 +249,8 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
 
     await expect(page.getByTestId('warehouse-inventory-list')).toBeVisible();
-    await expect(page.getByTestId(expectedInventoryTestId)).toContainText('10');
+    await expect(page.getByTestId(expectedInventoryTestId)).toContainText('10', { timeout: 180_000 });
+    await expect(page.getByTestId('completed-delivery-count')).toContainText('1');
   });
 
   test('places a connected road chain and persists it with the mineral inventory', async ({ page }) => {
@@ -209,7 +285,8 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await warehouseDestination.selectOption(warehouseIds[0]);
     await page.getByRole('button', { name: 'Assign Warehouse', exact: true }).click();
     await page.getByTestId('run-production-tick').click();
-    await expect(page.getByTestId('mine-delivered-total')).toContainText('10');
+    await expect(page.getByTestId('mine-delivered-total')).toContainText('0');
+    await expect(page.getByTestId('mine-output-buffer')).toContainText('10');
 
     await placeDeterministicRoadChain(page);
     await expect(page.getByTestId('road-count')).toContainText('3');
@@ -230,7 +307,7 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await expect(page.getByTestId('road-count')).toContainText('3');
     await expect(page.getByTestId('road-layout')).toHaveAttribute('data-road-layout', roadLayout!);
     await expect(page.getByTestId('warehouse-inventory-list')).toBeVisible();
-    await expect(page.getByTestId(`warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`)).toContainText('10');
+    await expect(page.getByTestId(`warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`)).toContainText('0');
   });
 
   test('locks generation input and exercises exploration controls', async ({ page }, testInfo) => {
@@ -756,6 +833,130 @@ async function placeDeterministicRoadChain(page: Page): Promise<void> {
     angular?.applyChanges?.(component);
   }, roadCells);
   await expect(page.locator('.placement-message')).toContainText('Placed road');
+}
+
+async function placeRoadRouteBetweenMineAndWarehouse(page: Page): Promise<void> {
+  const route = await page.evaluate(() => {
+    const angular = (window as unknown as {
+      ng?: {
+        getComponent?: (element: Element) => any;
+        applyChanges?: (component: any) => void;
+      };
+    }).ng;
+    const host = document.querySelector('app-world-session');
+    const component = host && angular?.getComponent?.(host);
+    if (!component) {
+      throw new Error('The Angular world-session component is unavailable to the browser test.');
+    }
+
+    const buildings = component.world.gameplay.placedBuildings;
+    const mine = buildings.find((building: any) => building.definitionId.includes('mine'));
+    const warehouse = buildings.find((building: any) => building.definitionId.includes('warehouse'));
+    if (!mine || !warehouse) {
+      throw new Error('The browser transport flow requires a mine and warehouse.');
+    }
+
+    const dimensions = component.world.map.configuration;
+    const footprint = (building: any): { x: number; y: number }[] => {
+      const definition = component['constructionDefinitions'].get(building.definitionId);
+      const width = building.rotationQuarterTurns % 2 === 0
+        ? definition.footprint.width
+        : definition.footprint.height;
+      const height = building.rotationQuarterTurns % 2 === 0
+        ? definition.footprint.height
+        : definition.footprint.width;
+      return Array.from({ length: width * height }, (_, index) => ({
+        x: building.origin.x + index % width,
+        y: building.origin.y + Math.floor(index / width),
+      }));
+    };
+    const footprintKeys = new Set([...footprint(mine), ...footprint(warehouse)]
+      .map((cell) => `${cell.x},${cell.y}`));
+    const roadKeys = new Set(component.world.gameplay.roads
+      .map((road: any) => `${road.cell.x},${road.cell.y}`));
+    const directions = [
+      { x: 0, y: -1 },
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+    ];
+    const validationCache = new Map<string, boolean>();
+    const isWalkable = (cell: { x: number; y: number }): boolean => {
+      if (cell.x < 0 || cell.x >= dimensions.width || cell.y < 0 || cell.y >= dimensions.height ||
+        footprintKeys.has(`${cell.x},${cell.y}`)) {
+        return false;
+      }
+      const key = `${cell.x},${cell.y}`;
+      if (roadKeys.has(key)) {
+        return true;
+      }
+      const cached = validationCache.get(key);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const valid = component['validateRoad'](cell).valid;
+      validationCache.set(key, valid);
+      return valid;
+    };
+    const accessCells = (building: any): { x: number; y: number }[] => {
+      const access = new Map<string, { x: number; y: number }>();
+      for (const cell of footprint(building)) {
+        for (const direction of directions) {
+          const candidate = { x: cell.x + direction.x, y: cell.y + direction.y };
+          if (isWalkable(candidate)) {
+            access.set(`${candidate.x},${candidate.y}`, candidate);
+          }
+        }
+      }
+      return [...access.values()].sort((left, right) => left.y - right.y || left.x - right.x);
+    };
+    const sourceAccess = accessCells(mine);
+    const destinationKeys = new Set(accessCells(warehouse).map((cell) => `${cell.x},${cell.y}`));
+    const queue = [...sourceAccess];
+    const previous = new Map<string, string | null>(
+      sourceAccess.map((cell) => [`${cell.x},${cell.y}`, null]),
+    );
+    let destinationKey: string | undefined;
+    for (let index = 0; index < queue.length && !destinationKey; index += 1) {
+      const current = queue[index];
+      if (!current) {
+        break;
+      }
+      if (destinationKeys.has(`${current.x},${current.y}`)) {
+        destinationKey = `${current.x},${current.y}`;
+        break;
+      }
+      for (const direction of directions) {
+        const next = { x: current.x + direction.x, y: current.y + direction.y };
+        const nextKey = `${next.x},${next.y}`;
+        if (!isWalkable(next) || previous.has(nextKey)) {
+          continue;
+        }
+        previous.set(nextKey, `${current.x},${current.y}`);
+        queue.push(next);
+      }
+    }
+    if (!destinationKey) {
+      throw new Error('Could not find a buildable road route between the mine and warehouse.');
+    }
+
+    const path: { x: number; y: number }[] = [];
+    let currentKey: string | null | undefined = destinationKey;
+    while (currentKey !== null && currentKey !== undefined) {
+      const [x, y] = currentKey.split(',').map(Number);
+      path.push({ x, y });
+      currentKey = previous.get(currentKey);
+    }
+    path.reverse();
+    component.activateRoadTool();
+    for (const cell of path) {
+      component['placeRoad'](cell);
+    }
+    angular?.applyChanges?.(component);
+    return path;
+  });
+
+  expect(route.length).toBeGreaterThan(0);
 }
 
 async function holdKey(page: Page, key: string, milliseconds: number): Promise<void> {

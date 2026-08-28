@@ -15,6 +15,7 @@ import {
   addWarehouseProductionState,
   assignMineWarehouse,
   findMineDepositBinding,
+  reconcileMineralProductionState,
   removeBuildingProductionState,
   runMineralProductionTick,
 } from './mineral-production';
@@ -93,7 +94,7 @@ describe('generic mineral production', () => {
     expect(incompatible).toBeNull();
   });
 
-  it('buffers output until a warehouse is assigned, then delivers only there', () => {
+  it('buffers output without delivering directly to a warehouse', () => {
     const mapData = createMapData('iron-ore', 12, 3);
     const binding = findMineDepositBinding({
       mapData,
@@ -120,15 +121,39 @@ describe('generic mineral production', () => {
       warehouse('warehouse-b'),
     ]);
 
-    expect(tick.production.warehouses.find((warehouse) => warehouse.warehouseBuildingId === 'warehouse-a')?.quantities['iron-ore']).toBe(20);
+    expect(tick.production.warehouses.find((warehouse) => warehouse.warehouseBuildingId === 'warehouse-a')?.quantities['iron-ore']).toBe(0);
     expect(tick.production.warehouses.find((warehouse) => warehouse.warehouseBuildingId === 'warehouse-b')?.quantities['iron-ore']).toBe(0);
-    expect(tick.production.mines[0].outputBuffer).toBe(0);
-    expect(tick.production.transfers.at(-1)?.status).toBe('delivered');
+    expect(tick.production.mines[0].outputBuffer).toBe(20);
+    expect(tick.production.transfers).toEqual([]);
+    expect(tick.delivered).toBe(0);
   });
 
-  it('shares deposit capacity between mines and stops at exhaustion', () => {
+  it('preserves an existing mine assignment during state reconciliation', () => {
+    const mapData = createMapData('iron-ore', 12, 3);
+    const mineBuilding = mine('mine-1', { x: 0, y: 0 });
+    const warehouseBuilding = warehouse('warehouse-a');
+    const binding = findMineDepositBinding({
+      mapData,
+      dimensions: DIMENSIONS,
+      building: mineBuilding,
+      definition: VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION,
+    })!;
+    let production = addMineProductionState(createEmptyMineralProductionState(), mineBuilding, binding);
+    production = addWarehouseProductionState(production, warehouseBuilding.id);
+    production = assignMineWarehouse(production, mineBuilding.id, warehouseBuilding.id);
+
+    const reconciled = reconcileMineralProductionState(
+      production,
+      [mineBuilding, warehouseBuilding],
+    );
+
+    expect(reconciled.mines[0]?.assignedWarehouseId).toBe(warehouseBuilding.id);
+  });
+
+  it('produces indefinitely from a shared deposit without depleting it', () => {
     const mapData = createMapData('stone', 12, 3);
-    mapData.deposits[0] = { ...mapData.deposits[0], baseCapacity: 15 };
+    // A zero legacy capacity must not disable the now-unlimited source.
+    mapData.deposits[0] = { ...mapData.deposits[0], baseCapacity: 0 };
     const first = mine('mine-1', { x: 0, y: 0 });
     const second = mine('mine-2', { x: 1, y: 0 });
     const binding = findMineDepositBinding({
@@ -143,8 +168,8 @@ describe('generic mineral production', () => {
     const secondTick = runMineralProductionTick(firstTick.production, [first, second]);
 
     expect(firstTick.production.deposits[0].remainingCapacity).toBe(0);
-    expect(firstTick.production.mines.map((mineState) => mineState.producedTotal)).toEqual([10, 5]);
-    expect(secondTick.production.mines.map((mineState) => mineState.producedTotal)).toEqual([10, 5]);
+    expect(firstTick.production.mines.map((mineState) => mineState.producedTotal)).toEqual([10, 10]);
+    expect(secondTick.production.mines.map((mineState) => mineState.producedTotal)).toEqual([20, 20]);
   });
 
   it('clears assignments and cancels pending transfers when a warehouse is removed', () => {

@@ -31,10 +31,14 @@ import {
   VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
 import type { PlacedBuildingState, RoadState } from './save/save-contract';
+import type { CourierVanState } from './save/save-contract';
+import { VehicleAssetRegistry } from './vehicle-asset-registry';
 import type { RoadConnectionMask } from './construction/road-network';
 import {
   createRaisedRoadTileGeometry,
   deriveRoadGradeProfiles,
+  ROAD_CROWN_HEIGHT,
+  ROAD_DECK_CLEARANCE,
   type RoadGradeProfile,
 } from './construction/road-geometry';
 import { clientPointToNormalizedDeviceCoordinate } from './construction/selection';
@@ -70,6 +74,8 @@ const MAP_DIMENSIONS = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
 const MINE_ASSET_ID = 'mine_shaft_house_lod0';
 const WAREHOUSE_ASSET_ID = 'warehouse_lod0';
 const BUILDING_LOD_VISIBLE_HEIGHT = 58;
+const COURIER_VAN_RENDER_SCALE = 0.4;
+const COURIER_VAN_VISUAL_INTERPOLATION_SECONDS = 0.1;
 
 export class GameScene {
   private readonly scene = new THREE.Scene();
@@ -80,6 +86,7 @@ export class GameScene {
   private readonly cameraController: CameraController;
   private readonly chunkStreamingManager: ChunkStreamingManager;
   private readonly visualAssetRegistry = new VisualAssetRegistry();
+  private readonly vehicleAssetRegistry = new VehicleAssetRegistry();
   private readonly quality: RenderQualitySettings;
   private readonly chunkDebugVisualizer: ChunkDebugVisualizer | null;
   private readonly mapBackdrop: THREE.Mesh;
@@ -93,6 +100,8 @@ export class GameScene {
   private readonly placedBuildingVisuals = new THREE.Group();
   private readonly roadVisuals = new THREE.Group();
   private readonly roadPreviewVisual = new THREE.Group();
+  private readonly vehicleVisuals = new THREE.Group();
+  private readonly placedBuildingOrigins = new Map<string, CellCoordinate>();
   private readonly onCanvasPointerMove = (event: PointerEvent): void => {
     const cell = this.getTerrainCellFromPointer(event.clientX, event.clientY);
     if (cell) {
@@ -117,6 +126,8 @@ export class GameScene {
   private fps = 60;
   private renderCpuMs = 0;
   private roadStates: readonly RoadState[] = [];
+  private courierVanStates = new Map<string, CourierVanState>();
+  private courierVanVisualTransitions = new Map<string, CourierVanVisualTransition>();
   private roadPreviewCacheKey: string | null = null;
 
   constructor(
@@ -156,6 +167,7 @@ export class GameScene {
     this.placedBuildingVisuals.name = 'construction-placed-buildings';
     this.roadVisuals.name = 'construction-placed-roads';
     this.roadPreviewVisual.name = 'construction-road-preview';
+    this.vehicleVisuals.name = 'transport-courier-vans';
     this.roadPreviewVisual.visible = false;
     this.scene.add(this.mapBackdrop);
     this.scene.add(this.selectedCellVisual);
@@ -165,6 +177,7 @@ export class GameScene {
     this.scene.add(this.roadVisuals);
     this.scene.add(this.roadPreviewVisual);
     this.scene.add(this.placedBuildingVisuals);
+    this.scene.add(this.vehicleVisuals);
     this.canvas.addEventListener('pointermove', this.onCanvasPointerMove);
     this.canvas.addEventListener('click', this.onCanvasClick);
     this.canvas.addEventListener('pointerleave', this.onCanvasPointerLeave);
@@ -190,6 +203,8 @@ export class GameScene {
     this.cameraController.dispose();
     this.chunkStreamingManager.destroy();
     this.visualAssetRegistry.destroy();
+    this.clearCourierVanVisuals();
+    this.vehicleAssetRegistry.destroy();
     this.chunkDebugVisualizer?.dispose();
     this.resizeObserver.disconnect();
     this.scene.traverse((object) => {
@@ -219,8 +234,13 @@ export class GameScene {
     this.setRoadPreview(null);
     this.clearRoadVisuals();
     this.roadStates = [];
+    this.clearCourierVanVisuals();
+    this.courierVanStates.clear();
+    this.courierVanVisualTransitions.clear();
     this.clearPlacedBuildingVisuals();
+    this.placedBuildingOrigins.clear();
     await this.visualAssetRegistry.load();
+    await this.vehicleAssetRegistry.load();
     this.chunkStreamingManager.beginMap(data, seaLevelSample);
     const seaLevelWorld = (seaLevelSample / 65_535) * TERRAIN_VERTICAL_SCALE + 0.08;
     this.cameraController.setNavigationPlaneY(seaLevelWorld);
@@ -455,6 +475,59 @@ export class GameScene {
     }
   }
 
+  setCourierVans(vehicles: readonly CourierVanState[]): void {
+    const now = performance.now();
+    const nextTransitions = new Map<string, CourierVanVisualTransition>();
+    for (const vehicle of vehicles) {
+      const existing = this.courierVanVisualTransitions.get(vehicle.id);
+      if (existing && areCourierVanStatesEqual(existing.to, vehicle)) {
+        nextTransitions.set(vehicle.id, existing);
+        continue;
+      }
+      nextTransitions.set(vehicle.id, {
+        from: existing?.to ?? vehicle,
+        to: vehicle,
+        startedAt: now,
+      });
+    }
+    this.courierVanVisualTransitions = nextTransitions;
+    this.courierVanStates = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+    const activeIds = new Set(this.courierVanStates.keys());
+    for (const child of [...this.vehicleVisuals.children]) {
+      if (!activeIds.has(String(child.userData['vehicleId'] ?? ''))) {
+        child.removeFromParent();
+      }
+    }
+    if (!this.vehicleAssetRegistry.hasCourierVan()) {
+      return;
+    }
+    for (const vehicle of vehicles) {
+      const existing = this.vehicleVisuals.children.find((child) =>
+        child.userData['vehicleId'] === vehicle.id,
+      );
+      if (existing) {
+        continue;
+      }
+      const instance = this.vehicleAssetRegistry.createCourierVanInstance();
+      if (!instance) {
+        continue;
+      }
+      const group = new THREE.Group();
+      group.name = `transport-courier-van-${vehicle.id}`;
+      group.userData['vehicleId'] = vehicle.id;
+      instance.scale.setScalar(COURIER_VAN_RENDER_SCALE);
+      instance.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.castShadow = true;
+          object.receiveShadow = true;
+        }
+      });
+      group.add(instance);
+      this.vehicleVisuals.add(group);
+    }
+    this.updateCourierVanVisuals();
+  }
+
   private roadConnectionMasksForCurrentRoads(): ReadonlyMap<string, RoadConnectionMask> {
     return deriveRoadConnectionMasks(this.roadStates);
   }
@@ -464,11 +537,13 @@ export class GameScene {
     definitions: ReadonlyMap<string, BuildingDefinition>,
   ): void {
     this.clearPlacedBuildingVisuals();
+    this.placedBuildingOrigins.clear();
     if (!this.mapData) {
       return;
     }
 
     for (const building of buildings) {
+      this.placedBuildingOrigins.set(building.id, { ...building.origin });
       const definition = definitions.get(building.definitionId);
       if (!definition) {
         continue;
@@ -511,6 +586,7 @@ export class GameScene {
           }),
         );
         mesh.name = `construction-building-${building.id}`;
+        mesh.userData['buildingId'] = building.id;
         mesh.position.set(center.x, baseElevation + height / 2, center.z);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
@@ -528,6 +604,10 @@ export class GameScene {
 
     this.pointer.set(normalized.x, normalized.y);
     this.raycaster.setFromCamera(this.pointer, this.camera);
+    const buildingCell = this.getPlacedBuildingCellFromPointer();
+    if (buildingCell) {
+      return buildingCell;
+    }
     const hit = this.chunkStreamingManager.raycastTerrain(this.raycaster);
     if (!hit) {
       return null;
@@ -536,8 +616,70 @@ export class GameScene {
     return terrainHitPointToCellCoordinate({ x: hit.x, z: hit.z }, MAP_DIMENSIONS);
   }
 
+  private getPlacedBuildingCellFromPointer(): CellCoordinate | null {
+    const intersections = this.raycaster.intersectObjects(this.placedBuildingVisuals.children, true);
+    for (const intersection of intersections) {
+      let object: THREE.Object3D | null = intersection.object;
+      while (object && object !== this.placedBuildingVisuals) {
+        const buildingId = object.userData['buildingId'];
+        if (typeof buildingId === 'string') {
+          const origin = this.placedBuildingOrigins.get(buildingId);
+          if (origin) {
+            return { ...origin };
+          }
+        }
+        object = object.parent;
+      }
+    }
+    return null;
+  }
+
   private clearPlacedBuildingVisuals(): void {
     disposeObjectChildren(this.placedBuildingVisuals);
+  }
+
+  private clearCourierVanVisuals(): void {
+    for (const child of [...this.vehicleVisuals.children]) {
+      child.removeFromParent();
+    }
+  }
+
+  private updateCourierVanVisuals(): void {
+    if (!this.mapData) {
+      return;
+    }
+    const roadGrades = deriveRoadGradeProfiles(this.mapData, MAP_DIMENSIONS, this.roadStates);
+    for (const vehicle of this.courierVanStates.values()) {
+      const visual = this.vehicleVisuals.children.find((child) =>
+        child.userData['vehicleId'] === vehicle.id,
+      );
+      if (!visual) {
+        continue;
+      }
+      const transition = this.courierVanVisualTransitions.get(vehicle.id);
+      if (!transition) {
+        continue;
+      }
+      const interpolation = THREE.MathUtils.clamp(
+        (performance.now() - transition.startedAt) / (COURIER_VAN_VISUAL_INTERPOLATION_SECONDS * 1_000),
+        0,
+        1,
+      );
+      const fromPose = getCourierVanPose(
+        this.mapData,
+        this.roadStates,
+        roadGrades,
+        transition.from,
+      );
+      const toPose = getCourierVanPose(
+        this.mapData,
+        this.roadStates,
+        roadGrades,
+        transition.to,
+      );
+      visual.position.lerpVectors(fromPose.position, toPose.position, interpolation);
+      visual.rotation.y = interpolateAngle(fromPose.heading, toPose.heading, interpolation);
+    }
   }
 
   private clearRoadVisuals(): void {
@@ -555,6 +697,7 @@ export class GameScene {
     this.passTimings.shadowPassCpuMs = 0;
     this.passTimings.gtaoPassCpuMs = 0;
     this.cameraController.update(this.frameTimeMs / 1_000);
+    this.updateCourierVanVisuals();
     updateBuildingVisualLods(
       this.placedBuildingVisuals,
       this.cameraController.getDebugState().visibleViewHeight > BUILDING_LOD_VISIBLE_HEIGHT ? 1 : 0,
@@ -921,6 +1064,7 @@ function createAuthoredBuildingVisual(
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = `construction-building-${buildingId}`;
+  group.userData['buildingId'] = buildingId;
   for (const lod of preview ? [0] as const : [0, 1] as const) {
     const asset = assets.getLodAsset(assetId, lod);
     const materials = (Array.isArray(asset.material) ? asset.material : [asset.material])
@@ -970,6 +1114,95 @@ function getBuildingAssetId(definitionId: string): string | null {
     return WAREHOUSE_ASSET_ID;
   }
   return null;
+}
+
+interface CourierVanPose {
+  readonly position: THREE.Vector3;
+  readonly heading: number;
+}
+
+interface CourierVanVisualTransition {
+  readonly from: CourierVanState;
+  readonly to: CourierVanState;
+  readonly startedAt: number;
+}
+
+function areCourierVanStatesEqual(left: CourierVanState, right: CourierVanState): boolean {
+  if (left.id !== right.id ||
+      left.transferId !== right.transferId ||
+      left.sourceMineId !== right.sourceMineId ||
+      left.destinationWarehouseId !== right.destinationWarehouseId ||
+      left.resourceKind !== right.resourceKind ||
+      left.amount !== right.amount ||
+      left.routeIndex !== right.routeIndex ||
+      left.progress !== right.progress ||
+      left.phase !== right.phase ||
+      left.phaseRemainingSeconds !== right.phaseRemainingSeconds ||
+      left.route.length !== right.route.length) {
+    return false;
+  }
+  return left.route.every((cell, index) => {
+    const other = right.route[index];
+    return other !== undefined && cell.x === other.x && cell.y === other.y;
+  });
+}
+
+function interpolateAngle(from: number, to: number, amount: number): number {
+  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+  return from + delta * amount;
+}
+
+function getCourierVanPose(
+  mapData: AuthoritativeMapData,
+  roads: readonly RoadState[],
+  roadGrades: ReadonlyMap<string, RoadGradeProfile>,
+  vehicle: CourierVanState,
+): CourierVanPose {
+  const route = vehicle.route;
+  const routeIndex = Math.min(Math.max(vehicle.routeIndex, 0), route.length - 1);
+  const currentCell = route[routeIndex] ?? route[0] ?? { x: 0, y: 0 };
+  const unloading = vehicle.phase === 'unloading' && routeIndex > 0;
+  const positionFromCell = unloading ? route[routeIndex - 1] ?? currentCell : currentCell;
+  const positionToCell = vehicle.phase === 'enroute'
+    ? route[Math.min(routeIndex + 1, route.length - 1)] ?? currentCell
+    : vehicle.phase === 'loading' ? route[1] ?? currentCell : currentCell;
+  const travelProgress = vehicle.phase === 'enroute'
+    ? THREE.MathUtils.clamp(vehicle.progress, 0, 1)
+    : unloading ? 1 : 0;
+  const positionFrom = cellToWorldCenter(positionFromCell, MAP_DIMENSIONS);
+  const positionTo = cellToWorldCenter(positionToCell, MAP_DIMENSIONS);
+  const x = THREE.MathUtils.lerp(positionFrom.x, positionTo.x, travelProgress);
+  const z = THREE.MathUtils.lerp(positionFrom.z, positionTo.z, travelProgress);
+  const currentElevation = getRoadOrTerrainElevation(mapData, roads, roadGrades, positionFromCell);
+  const nextElevation = getRoadOrTerrainElevation(mapData, roads, roadGrades, positionToCell);
+  const y = THREE.MathUtils.lerp(currentElevation, nextElevation, travelProgress) + 0.02;
+  const directionX = positionTo.x - positionFrom.x;
+  const directionZ = positionTo.z - positionFrom.z;
+  const heading = Math.abs(directionX) + Math.abs(directionZ) > Number.EPSILON
+    ? Math.atan2(directionZ, -directionX)
+    : 0;
+  return {
+    position: new THREE.Vector3(x, y, z),
+    heading,
+  };
+}
+
+function getRoadOrTerrainElevation(
+  mapData: AuthoritativeMapData,
+  roads: readonly RoadState[],
+  roadGrades: ReadonlyMap<string, RoadGradeProfile>,
+  cell: CellCoordinate,
+): number {
+  const grade = roadGrades.get(getRoadCellKey(cell));
+  if (grade) {
+    return grade.centerElevation + ROAD_CROWN_HEIGHT;
+  }
+  // Active trips use a route snapshot. If a road is removed underneath one,
+  // keep the van moving over the former route at a stable terrain-relative
+  // height instead of snapping it to the world origin.
+  const isRoad = roads.some((road) => road.cell.x === cell.x && road.cell.y === cell.y);
+  const terrain = getConstructionTerrainSample(mapData, MAP_DIMENSIONS, cell);
+  return terrain.elevationWorld + ROAD_DECK_CLEARANCE + (isRoad ? ROAD_CROWN_HEIGHT : 0);
 }
 
 function createMapCorners(): readonly THREE.Vector3[] {

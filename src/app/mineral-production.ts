@@ -19,9 +19,9 @@ import {
   MineProductionState,
   MineralProductionState,
   PlacedBuildingState,
-  TransferOrder,
   WarehouseInventoryState,
   createEmptyMineralInventory,
+  trimTransferHistory,
 } from './save/save-contract';
 
 export const MINE_RESOURCE_ANCHOR = Object.freeze({
@@ -31,8 +31,6 @@ export const MINE_RESOURCE_ANCHOR = Object.freeze({
 });
 
 export const MINERAL_PRODUCTION_RATE = 10;
-const MAX_TRANSFER_HISTORY = 64;
-
 export interface MineBindingResult {
   readonly anchorCell: CellCoordinate;
   readonly deposit: DepositSource;
@@ -224,13 +222,7 @@ export function runMineralProductionTick(
   const warehouses = production.warehouses.filter((warehouse) =>
     existingBuildingIds.has(warehouse.warehouseBuildingId));
   const deposits = production.deposits.map((deposit) => ({ ...deposit }));
-  const warehouseById = new Map(warehouses.map((warehouse) => [
-    warehouse.warehouseBuildingId,
-    { ...warehouse, quantities: { ...warehouse.quantities } },
-  ]));
   const depositById = new Map(deposits.map((deposit) => [deposit.depositId, deposit]));
-  const transfers: TransferOrder[] = [...production.transfers];
-  let delivered = 0;
   let buffered = 0;
   const nextMines: MineProductionState[] = [];
 
@@ -242,34 +234,16 @@ export function runMineralProductionTick(
       continue;
     }
 
-    const extracted = Math.min(MINERAL_PRODUCTION_RATE, Math.max(0, deposit.remainingCapacity));
-    deposit.remainingCapacity -= extracted;
+    // Deposits are an unlimited gameplay source. `remainingCapacity` is kept
+    // in the saved/map contract for compatibility with older worlds and map
+    // metadata, but it is not a production limiter.
+    const extracted = MINERAL_PRODUCTION_RATE;
     const outputBuffer = mine.outputBuffer + extracted;
-    const warehouse = mine.assignedWarehouseId === null
-      ? undefined
-      : warehouseById.get(mine.assignedWarehouseId);
-    const deliveryAmount = warehouse ? outputBuffer : 0;
-
-    if (warehouse && deliveryAmount > 0) {
-      warehouse.quantities[mine.resourceKind] += deliveryAmount;
-      delivered += deliveryAmount;
-      transfers.push({
-        id: `transfer-${production.tick + 1}-${mine.mineBuildingId}`,
-        sourceMineId: mine.mineBuildingId,
-        destinationWarehouseId: warehouse.warehouseBuildingId,
-        resourceKind: mine.resourceKind,
-        amount: deliveryAmount,
-        status: 'delivered',
-      });
-    }
-
-    const remainingBuffer = outputBuffer - deliveryAmount;
-    buffered += remainingBuffer;
+    buffered += outputBuffer;
     nextMines.push({
       ...mine,
-      outputBuffer: remainingBuffer,
+      outputBuffer,
       producedTotal: mine.producedTotal + extracted,
-      deliveredTotal: mine.deliveredTotal + deliveryAmount,
     });
   }
 
@@ -278,10 +252,11 @@ export function runMineralProductionTick(
       tick: production.tick + 1,
       deposits,
       mines: nextMines,
-      warehouses: [...warehouseById.values()],
-      transfers: transfers.slice(-MAX_TRANSFER_HISTORY),
+      warehouses,
+      transfers: trimTransferHistory(production.transfers),
+      completedDeliveryCount: production.completedDeliveryCount,
     },
-    delivered,
+    delivered: 0,
     buffered,
   };
 }

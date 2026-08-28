@@ -53,6 +53,14 @@ import {
   removeBuildingProductionState,
   runMineralProductionTick,
 } from './mineral-production';
+import {
+  advanceCourierVans,
+  cancelCourierVansForBuilding,
+  dispatchCourierVans,
+  getCourierVanTransportSummary,
+  VEHICLE_SIMULATION_MAX_DELTA_SECONDS,
+  VEHICLE_SIMULATION_STEP_SECONDS,
+} from './vehicle-transport';
 
 @Component({
   selector: 'app-world-session',
@@ -168,16 +176,19 @@ import {
                 <h3>Mine production</h3>
                 <p data-testid="mine-resource">Resource: {{ formatMineralKind(selectedMineProduction.resourceKind) }}</p>
                 <p data-testid="mine-deposit">Deposit: #{{ selectedMineProduction.depositId }}</p>
-                <p data-testid="mine-remaining-capacity">Remaining capacity: {{ selectedDepositRemainingCapacity }}</p>
+                <p data-testid="mine-deposit-supply">Deposit supply: Unlimited</p>
                 <p data-testid="mine-output-buffer">Buffered: {{ selectedMineProduction.outputBuffer }}</p>
                 <p data-testid="mine-produced-total">Produced: {{ selectedMineProduction.producedTotal }}</p>
                 <p data-testid="mine-delivered-total">Delivered: {{ selectedMineProduction.deliveredTotal }}</p>
+                <p data-testid="mine-assigned-warehouse">
+                  Assigned warehouse: {{ selectedMineProduction.assignedWarehouseId ?? 'Unassigned' }}
+                </p>
                 <label>
                   Warehouse destination
                   <select
                     aria-label="Warehouse destination"
-                    [value]="warehouseSelection"
-                    (change)="warehouseSelection = readSelectValue($event)"
+                    [value]="selectedWarehouseDestination"
+                    (change)="setWarehouseSelection($event)"
                   >
                     <option value="">Unassigned</option>
                     @for (warehouse of warehouseBuildings; track warehouse.id) {
@@ -220,6 +231,16 @@ import {
             <p data-testid="road-layout" [attr.data-road-layout]="roadLayout">{{ roadLayout }}</p>
           </section>
         }
+        <section class="production-card transport-summary" data-testid="transport-summary">
+          <h3>Transport</h3>
+          <p data-testid="active-van-count">Active courier vans: {{ transportSummary.activeVans }}</p>
+          <p data-testid="pending-delivery-count">Pending deliveries: {{ transportSummary.pendingDeliveries }}</p>
+          <p data-testid="blocked-delivery-count">Blocked deliveries: {{ transportSummary.blockedDeliveries }}</p>
+          <p data-testid="completed-delivery-count">Completed deliveries: {{ transportSummary.completedDeliveries }}</p>
+          @if (transportSummary.blockedDeliveries > 0) {
+            <p class="transport-warning">Road access is needed before buffered mineral output can move.</p>
+          }
+        </section>
         @if (warehouseProductionStates.length > 0) {
           <section class="production-card" data-testid="warehouse-inventory-list">
             <h3>Warehouse inventories</h3>
@@ -575,6 +596,8 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   private gameScene: import('./game-scene').GameScene | null = null;
   private isDestroyed = false;
   private autosaveTimer: ReturnType<typeof setInterval> | null = null;
+  private vehicleSimulationTimer: ReturnType<typeof setInterval> | null = null;
+  private lastVehicleSimulationAt = performance.now();
   private autosavePromise: Promise<boolean> | null = null;
   world: WorldSessionData | null = this.sessionRuntime.getActiveWorld();
   private occupancy: CellOccupancy = createEmptyOccupancy();
@@ -587,6 +610,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   roadPlacementPreview: RoadPlacementValidationResult | null = null;
   placementMessage: string | null = null;
   warehouseSelection = '';
+  private warehouseSelectionChanged = false;
   mineralDepositSelection = '';
   showSaveDialog = false;
   manualSaveName = '';
@@ -613,10 +637,12 @@ export class WorldSession implements AfterViewInit, OnDestroy {
           this.world.gameplay.production,
           this.world.gameplay.placedBuildings,
         ),
+        vehicles: this.world.gameplay.vehicles ?? [],
       },
     };
     this.sessionRuntime.setActiveWorld(this.world);
     this.rebuildOccupancy();
+    this.dispatchAvailableCourierVans();
 
     setTimeout(() => {
       if (!this.isDestroyed) {
@@ -626,6 +652,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.autosaveTimer = setInterval(() => {
       void this.performAutosave();
     }, AUTOSAVE_INTERVAL_MS);
+    this.startVehicleSimulationTimer();
 
     void import('./game-scene')
       .then(({ GameScene }) => {
@@ -780,16 +807,6 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     ) ?? null;
   }
 
-  get selectedDepositRemainingCapacity(): number {
-    const mine = this.selectedMineProduction;
-    if (!mine || !this.world) {
-      return 0;
-    }
-    return this.world.gameplay.production.deposits.find((deposit) =>
-      deposit.depositId === mine.depositId,
-    )?.remainingCapacity ?? 0;
-  }
-
   get warehouseBuildings(): readonly PlacedBuildingState[] {
     return this.world?.gameplay.placedBuildings.filter((building) =>
       building.definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
@@ -810,8 +827,34 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     ) ?? null;
   }
 
+  get selectedWarehouseDestination(): string {
+    if (this.warehouseSelectionChanged) {
+      return this.warehouseSelection;
+    }
+    return this.selectedMineProduction?.assignedWarehouseId ?? '';
+  }
+
   get warehouseProductionStates(): readonly WorldSessionData['gameplay']['production']['warehouses'][number][] {
     return this.world?.gameplay?.production?.warehouses ?? [];
+  }
+
+  get transportSummary() {
+    const gameplay = this.world?.gameplay;
+    if (!gameplay?.production) {
+      return {
+        activeVans: 0,
+        pendingDeliveries: 0,
+        blockedDeliveries: 0,
+        completedDeliveries: 0,
+      };
+    }
+    return getCourierVanTransportSummary(
+      gameplay.production,
+      gameplay.vehicles ?? [],
+      gameplay.placedBuildings ?? [],
+      gameplay.roads ?? [],
+      this.constructionDefinitions,
+    );
   }
 
   removeSelectedBuilding(): void {
@@ -819,14 +862,21 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     if (!selectedBuilding || !this.world) {
       return;
     }
-    const production = removeBuildingProductionState(
+    const cancelled = cancelCourierVansForBuilding(
       this.world.gameplay.production,
+      this.world.gameplay.vehicles,
+      selectedBuilding.id,
+    );
+    const production = removeBuildingProductionState(
+      cancelled.production,
       selectedBuilding.id,
       selectedBuilding.definitionId,
     );
     this.updatePlacedBuildings(
       this.world.gameplay.placedBuildings.filter((building) => building.id !== selectedBuilding.id),
       production,
+      this.world.gameplay.roads,
+      cancelled.vehicles,
     );
     this.placementMessage = `Removed the selected ${getBuildingLabel(selectedBuilding.definitionId)}.`;
     if (this.activeTool !== 'select' && this.selectedCell) {
@@ -844,6 +894,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       this.world.gameplay.production,
       removeRoad(this.world.gameplay.roads, selectedRoad.cell),
     );
+    this.dispatchAvailableCourierVans();
     this.placementMessage = `Removed the road at ${selectedRoad.cell.x}, ${selectedRoad.cell.y}.`;
     this.selectCell(selectedRoad.cell);
   }
@@ -851,6 +902,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   private selectCell(cell: CellCoordinate): void {
     this.selectedCell = { x: cell.x, y: cell.y };
     this.warehouseSelection = this.selectedMineProduction?.assignedWarehouseId ?? '';
+    this.warehouseSelectionChanged = false;
     this.gameScene?.setSelectedCell(this.selectedCell);
   }
 
@@ -947,6 +999,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       production = addWarehouseProductionState(production, building.id);
     }
     this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building], production);
+    this.dispatchAvailableCourierVans();
     this.selectCell(origin);
     this.placementMessage = `Placed ${label} at ${origin.x}, ${origin.y}.`;
     this.placementPreview = null;
@@ -974,6 +1027,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       this.world.gameplay.production,
       roads,
     );
+    this.dispatchAvailableCourierVans();
     this.selectCell(cell);
     this.placementMessage = `Placed road at ${cell.x}, ${cell.y}.`;
     this.roadPlacementPreview = null;
@@ -1200,6 +1254,8 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     placedBuildings: readonly PlacedBuildingState[],
     production = this.world?.gameplay.production,
     roads = this.world?.gameplay.roads ?? [],
+    vehicles = this.world?.gameplay.vehicles ?? [],
+    syncStaticVisuals = true,
   ): void {
     if (!this.world) {
       return;
@@ -1214,32 +1270,36 @@ export class WorldSession implements AfterViewInit, OnDestroy {
           production ?? this.world.gameplay.production,
           placedBuildings,
         ),
+        vehicles,
       },
     });
     this.sessionRuntime.setActiveWorld(this.world);
-    this.syncConstructionVisuals();
+    this.syncConstructionVisuals(syncStaticVisuals);
   }
 
-  private syncConstructionVisuals(): void {
-    this.rebuildOccupancy();
-    this.gameScene?.setConstructionVisualState(
-      this.world?.gameplay.clearedCellIndices ?? [],
-      this.world
-        ? getCurrentConstructionCellIndices(
-          this.occupancy,
-          this.world.gameplay.roads,
-          this.getGridDimensions(),
-        )
-        : [],
-    );
-    this.gameScene?.setPlacedBuildings(
-      this.world?.gameplay.placedBuildings ?? [],
-      this.constructionDefinitions,
-    );
-    this.gameScene?.setRoads(
-      this.world?.gameplay.roads ?? [],
-      deriveRoadConnectionMasks(this.world?.gameplay.roads ?? []),
-    );
+  private syncConstructionVisuals(syncStaticVisuals = true): void {
+    if (syncStaticVisuals) {
+      this.rebuildOccupancy();
+      this.gameScene?.setConstructionVisualState(
+        this.world?.gameplay.clearedCellIndices ?? [],
+        this.world
+          ? getCurrentConstructionCellIndices(
+            this.occupancy,
+            this.world.gameplay.roads,
+            this.getGridDimensions(),
+          )
+          : [],
+      );
+      this.gameScene?.setPlacedBuildings(
+        this.world?.gameplay.placedBuildings ?? [],
+        this.constructionDefinitions,
+      );
+      this.gameScene?.setRoads(
+        this.world?.gameplay.roads ?? [],
+        deriveRoadConnectionMasks(this.world?.gameplay.roads ?? []),
+      );
+    }
+    this.gameScene?.setCourierVans(this.world?.gameplay.vehicles ?? []);
   }
 
   private getClearedCellIndices(
@@ -1306,18 +1366,33 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     return (event.target as HTMLSelectElement).value;
   }
 
+  setWarehouseSelection(event: Event): void {
+    this.warehouseSelection = this.readSelectValue(event);
+    this.warehouseSelectionChanged = true;
+  }
+
   assignSelectedMineWarehouse(): void {
     const selectedMine = this.selectedMineProduction;
     if (!selectedMine || !this.world) {
       return;
     }
-    const warehouseId = this.warehouseSelection || null;
+    // Keep the authoritative assignment when a re-selection happened before
+    // the browser had restored the select's displayed value. An explicit
+    // change to “Unassigned” still clears it.
+    const warehouseId = this.warehouseSelectionChanged
+      ? this.warehouseSelection || null
+      : selectedMine.assignedWarehouseId;
     const production = assignMineWarehouse(
       this.world.gameplay.production,
       selectedMine.mineBuildingId,
       warehouseId,
     );
     this.updatePlacedBuildings(this.world.gameplay.placedBuildings, production);
+    this.dispatchAvailableCourierVans();
+    this.warehouseSelection = this.world.gameplay.production.mines.find((mine) =>
+      mine.mineBuildingId === selectedMine.mineBuildingId,
+    )?.assignedWarehouseId ?? '';
+    this.warehouseSelectionChanged = false;
     this.placementMessage = warehouseId
       ? `Assigned ${selectedMine.mineBuildingId} to ${warehouseId}.`
       : `Unassigned ${selectedMine.mineBuildingId}.`;
@@ -1331,12 +1406,26 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       this.world.gameplay.production,
       this.world.gameplay.placedBuildings,
     );
-    this.updatePlacedBuildings(this.world.gameplay.placedBuildings, result.production);
-    this.placementMessage = result.delivered > 0
-      ? `Tick ${result.production.tick}: delivered ${result.delivered} mineral units.`
-      : result.buffered > 0
-        ? `Tick ${result.production.tick}: ${result.buffered} mineral units buffered.`
-        : `Tick ${result.production.tick}: no mineral output available.`;
+    const dispatch = dispatchCourierVans(
+      result.production,
+      this.world.gameplay.vehicles,
+      this.world.gameplay.placedBuildings,
+      this.world.gameplay.roads,
+      this.constructionDefinitions,
+    );
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      dispatch.production,
+      this.world.gameplay.roads,
+      dispatch.vehicles,
+    );
+    this.placementMessage = dispatch.dispatchedVans > 0
+      ? `Tick ${result.production.tick}: dispatched ${dispatch.dispatchedUnits} mineral units in ${dispatch.dispatchedVans} courier van${dispatch.dispatchedVans === 1 ? '' : 's'}.`
+      : dispatch.blockedDeliveries > 0
+        ? `Tick ${result.production.tick}: mineral output is buffered until a road route is available.`
+        : result.buffered > 0
+          ? `Tick ${result.production.tick}: ${result.buffered} mineral units buffered.`
+          : `Tick ${result.production.tick}: no mineral output available.`;
   }
 
   async leaveWorld(): Promise<void> {
@@ -1344,9 +1433,11 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       return;
     }
     this.isLeaving = true;
+    this.stopVehicleSimulationTimer();
     const autosaved = await this.performAutosave();
     if (!autosaved) {
       this.isLeaving = false;
+      this.startVehicleSimulationTimer();
       return;
     }
     this.stopAutosaveTimer();
@@ -1357,6 +1448,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.isDestroyed = true;
     this.stopAutosaveTimer();
+    this.stopVehicleSimulationTimer();
     this.sessionRuntime.clearActiveWorld();
     this.gameScene?.destroy();
   }
@@ -1400,6 +1492,88 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       clearInterval(this.autosaveTimer);
       this.autosaveTimer = null;
     }
+  }
+
+  private startVehicleSimulationTimer(): void {
+    if (this.vehicleSimulationTimer !== null) {
+      return;
+    }
+    this.lastVehicleSimulationAt = performance.now();
+    this.vehicleSimulationTimer = setInterval(
+      () => this.advanceVehicleSimulation(),
+      VEHICLE_SIMULATION_STEP_SECONDS * 1_000,
+    );
+  }
+
+  private stopVehicleSimulationTimer(): void {
+    if (this.vehicleSimulationTimer !== null) {
+      clearInterval(this.vehicleSimulationTimer);
+      this.vehicleSimulationTimer = null;
+    }
+  }
+
+  private advanceVehicleSimulation(): void {
+    const now = performance.now();
+    const elapsed = Math.min(
+      VEHICLE_SIMULATION_MAX_DELTA_SECONDS,
+      Math.max(0, (now - this.lastVehicleSimulationAt) / 1_000),
+    );
+    this.lastVehicleSimulationAt = now;
+    if (!this.world || this.isSaving || this.isLeaving) {
+      return;
+    }
+
+    const advanced = this.world.gameplay.vehicles.length > 0
+      ? advanceCourierVans(
+        this.world.gameplay.production,
+        this.world.gameplay.vehicles,
+        elapsed,
+      )
+      : {
+        production: this.world.gameplay.production,
+        vehicles: this.world.gameplay.vehicles,
+        deliveredUnits: 0,
+        arrivedVans: 0,
+      };
+    const dispatch = dispatchCourierVans(
+      advanced.production,
+      advanced.vehicles,
+      this.world.gameplay.placedBuildings,
+      this.world.gameplay.roads,
+      this.constructionDefinitions,
+    );
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      dispatch.production,
+      this.world.gameplay.roads,
+      dispatch.vehicles,
+      false,
+    );
+    if (advanced.deliveredUnits > 0) {
+      this.placementMessage = `Courier van delivered ${advanced.deliveredUnits} mineral units.`;
+    }
+  }
+
+  private dispatchAvailableCourierVans(): void {
+    if (!this.world) {
+      return;
+    }
+    const dispatch = dispatchCourierVans(
+      this.world.gameplay.production,
+      this.world.gameplay.vehicles,
+      this.world.gameplay.placedBuildings,
+      this.world.gameplay.roads,
+      this.constructionDefinitions,
+    );
+    if (dispatch.dispatchedVans === 0) {
+      return;
+    }
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      dispatch.production,
+      this.world.gameplay.roads,
+      dispatch.vehicles,
+    );
   }
 }
 

@@ -11,7 +11,10 @@ export const LEGACY_SAVE_GAME_SCHEMA_VERSION = 1 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 = 2 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 = 3 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 = 4 as const;
-export const SAVE_GAME_SCHEMA_VERSION = 5 as const;
+export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 = 5 as const;
+export const SAVE_GAME_SCHEMA_VERSION = 6 as const;
+export const COURIER_VAN_CAPACITY = 10 as const;
+export const MAX_MINERAL_OUTPUT_BUFFER = 10_000 as const;
 export const AUTOSAVE_ID = 'autosave' as const;
 export const AUTOSAVE_NAME = 'Autosave' as const;
 
@@ -67,12 +70,29 @@ export interface TransferOrder {
   readonly status: TransferStatus;
 }
 
+export type CourierVanPhase = 'loading' | 'enroute' | 'unloading';
+
+export interface CourierVanState {
+  readonly id: string;
+  readonly transferId: string;
+  readonly sourceMineId: string;
+  readonly destinationWarehouseId: string;
+  readonly resourceKind: MineralResourceKind;
+  readonly amount: number;
+  readonly route: readonly GridOrigin[];
+  readonly routeIndex: number;
+  readonly progress: number;
+  readonly phase: CourierVanPhase;
+  readonly phaseRemainingSeconds: number;
+}
+
 export interface MineralProductionState {
   readonly tick: number;
   readonly deposits: readonly DepositProductionState[];
   readonly mines: readonly MineProductionState[];
   readonly warehouses: readonly WarehouseInventoryState[];
   readonly transfers: readonly TransferOrder[];
+  readonly completedDeliveryCount: number;
 }
 
 export interface GameplayState {
@@ -80,6 +100,7 @@ export interface GameplayState {
   readonly roads: readonly RoadState[];
   readonly clearedCellIndices: readonly number[];
   readonly production: MineralProductionState;
+  readonly vehicles: readonly CourierVanState[];
 }
 
 export interface WorldMapSnapshot {
@@ -151,6 +172,7 @@ export function createWorldSession(
       roads: [],
       clearedCellIndices: [],
       production: createEmptyMineralProductionState(),
+      vehicles: [],
     },
   };
 }
@@ -213,6 +235,10 @@ export function createUpdatedWorldSession(
       })),
       clearedCellIndices: [...(world.gameplay.clearedCellIndices ?? [])],
       production: cloneMineralProductionState(world.gameplay.production),
+      vehicles: world.gameplay.vehicles.map((vehicle) => ({
+        ...vehicle,
+        route: vehicle.route.map((cell) => ({ ...cell })),
+      })),
     },
   };
 }
@@ -236,6 +262,7 @@ export function createEmptyMineralProductionState(): MineralProductionState {
     mines: [],
     warehouses: [],
     transfers: [],
+    completedDeliveryCount: 0,
   };
 }
 
@@ -251,5 +278,21 @@ export function cloneMineralProductionState(
       quantities: { ...warehouse.quantities },
     })),
     transfers: production.transfers.map((transfer) => ({ ...transfer })),
+    completedDeliveryCount: production.completedDeliveryCount,
   };
+}
+
+/** Keep history bounded without dropping orders attached to live vans. */
+export function trimTransferHistory(transfers: readonly TransferOrder[]): TransferOrder[] {
+  const completed = transfers.filter((transfer) => transfer.status !== 'pending');
+  if (completed.length <= 64) {
+    return [...transfers];
+  }
+
+  const retainedCompletedIds = new Set(
+    completed.slice(-64).map((transfer) => transfer.id),
+  );
+  return transfers.filter((transfer) =>
+    transfer.status === 'pending' || retainedCompletedIds.has(transfer.id),
+  );
 }

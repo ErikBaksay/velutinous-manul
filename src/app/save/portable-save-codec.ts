@@ -12,14 +12,19 @@ import {
   createEmptyMineralProductionState,
   createFallbackImportedSlotName,
   createUpdatedWorldSession,
+  COURIER_VAN_CAPACITY,
+  CourierVanState,
   LegacySaveGame,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V2,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
   SaveGame,
   SaveSlotKind,
   SAVE_GAME_FORMAT,
   SAVE_GAME_SCHEMA_VERSION,
+  MAX_MINERAL_OUTPUT_BUFFER,
+  type TransferStatus,
   WorldSession,
 } from './save-contract';
 
@@ -114,6 +119,7 @@ export function parsePortableSaveFile(content: string): SaveGame {
   if (schemaVersion !== 1 && schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError(`Save schema version ${schemaVersion} is not supported.`);
   }
@@ -123,7 +129,8 @@ export function parsePortableSaveFile(content: string): SaveGame {
     envelope['world'],
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
-    schemaVersion === SAVE_GAME_SCHEMA_VERSION,
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+    schemaVersion >= SAVE_GAME_SCHEMA_VERSION,
   );
 
   if (schemaVersion === 1) {
@@ -165,6 +172,7 @@ export function validateSaveGame(value: unknown): SaveGame {
   if (schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError('The stored save uses an unsupported schema version.');
   }
@@ -175,7 +183,8 @@ export function validateSaveGame(value: unknown): SaveGame {
     save['world'],
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
-    schemaVersion === SAVE_GAME_SCHEMA_VERSION,
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+    schemaVersion >= SAVE_GAME_SCHEMA_VERSION,
   );
   return {
     format: SAVE_GAME_FORMAT,
@@ -223,6 +232,7 @@ function decodeWorld(
   includeProduction: boolean,
   includeRoads: boolean,
   includeClearedCells: boolean,
+  includeVehicles: boolean,
 ): WorldSession {
   const raw = asRecord(value, 'The save world is missing or invalid.');
   const map = asRecord(raw['map'], 'The save map is missing or invalid.');
@@ -246,11 +256,12 @@ function decodeWorld(
       includeProduction,
       includeRoads,
       includeClearedCells,
+      includeVehicles,
       configuration.width,
       configuration.height,
     ),
   };
-  return validateWorld(world, includeProduction, includeRoads, includeClearedCells);
+  return validateWorld(world, includeProduction, includeRoads, includeClearedCells, includeVehicles);
 }
 
 function validateWorld(
@@ -258,6 +269,7 @@ function validateWorld(
   includeProduction: boolean,
   includeRoads: boolean,
   includeClearedCells: boolean,
+  includeVehicles: boolean,
 ): WorldSession {
   const raw = asRecord(value, 'The world session is missing or invalid.');
   const map = asRecord(raw['map'], 'The world map is missing or invalid.');
@@ -281,6 +293,7 @@ function validateWorld(
       includeProduction,
       includeRoads,
       includeClearedCells,
+      includeVehicles,
       configuration.width,
       configuration.height,
     ),
@@ -421,10 +434,11 @@ function decodeGameplay(
   includeProduction: boolean,
   includeRoads: boolean,
   includeClearedCells: boolean,
+  includeVehicles: boolean,
   width: number,
   height: number,
 ): WorldSession['gameplay'] {
-  return validateGameplay(value, includeProduction, includeRoads, includeClearedCells, width, height);
+  return validateGameplay(value, includeProduction, includeRoads, includeClearedCells, includeVehicles, width, height);
 }
 
 function validateGameplay(
@@ -432,12 +446,31 @@ function validateGameplay(
   includeProduction: boolean,
   includeRoads: boolean,
   includeClearedCells: boolean,
+  includeVehicles: boolean,
   width: number,
   height: number,
 ): WorldSession['gameplay'] {
   const raw = asRecord(value, 'The gameplay state is missing or invalid.');
   if (!Array.isArray(raw['placedBuildings'])) {
     throw new SaveValidationError('The placed-building state is invalid.');
+  }
+  const production = includeProduction
+    ? validateMineralProductionState(raw['production'])
+    : createEmptyMineralProductionState();
+  const vehicles = includeVehicles
+    ? validateCourierVans(raw['vehicles'], width, height)
+    : [];
+  if (includeVehicles) {
+    for (const vehicle of vehicles) {
+      const transfer = production.transfers.find((candidate) => candidate.id === vehicle.transferId);
+      if (!transfer || transfer.status !== 'pending' ||
+          transfer.sourceMineId !== vehicle.sourceMineId ||
+          transfer.destinationWarehouseId !== vehicle.destinationWarehouseId ||
+          transfer.resourceKind !== vehicle.resourceKind ||
+          transfer.amount !== vehicle.amount) {
+        throw new SaveValidationError('The courier-van transfer is missing or inconsistent.');
+      }
+    }
   }
   return {
     placedBuildings: raw['placedBuildings'].map((building, index) => {
@@ -469,10 +502,98 @@ function validateGameplay(
     clearedCellIndices: includeClearedCells
       ? validateClearedCellIndices(raw['clearedCellIndices'], width, height)
       : [],
-    production: includeProduction
-      ? validateMineralProductionState(raw['production'])
-      : createEmptyMineralProductionState(),
+    production,
+    vehicles,
   };
+}
+
+function validateCourierVans(
+  value: unknown,
+  width: number,
+  height: number,
+): readonly CourierVanState[] {
+  if (!Array.isArray(value)) {
+    throw new SaveValidationError('The courier-van state is invalid.');
+  }
+  const seenIds = new Set<string>();
+  const seenTransferIds = new Set<string>();
+  return value.map((vehicle, index) => {
+    const item = asRecord(vehicle, `Courier van ${index} is invalid.`);
+    const id = assertNonEmptyString(item['id'], `Courier van ${index} ID is invalid.`);
+    const transferId = assertNonEmptyString(
+      item['transferId'],
+      `Courier van ${index} transfer ID is invalid.`,
+    );
+    if (seenIds.has(id) || seenTransferIds.has(transferId)) {
+      throw new SaveValidationError(`Courier van ${index} duplicates an active identity.`);
+    }
+    seenIds.add(id);
+    seenTransferIds.add(transferId);
+
+    const route = item['route'];
+    if (!Array.isArray(route) || route.length === 0) {
+      throw new SaveValidationError(`Courier van ${index} route is invalid.`);
+    }
+    const routeCells = route.map((cell, cellIndex) => {
+      const rawCell = asRecord(cell, `Courier van ${index} route cell ${cellIndex} is invalid.`);
+      const x = assertInteger(rawCell['x'], `Courier van ${index} route X is invalid.`);
+      const y = assertInteger(rawCell['y'], `Courier van ${index} route Y is invalid.`);
+      if (x < 0 || x >= width || y < 0 || y >= height) {
+        throw new SaveValidationError(`Courier van ${index} route cell is outside the map.`);
+      }
+      return { x, y };
+    });
+    const routeKeys = new Set(routeCells.map((cell) => `${cell.x},${cell.y}`));
+    if (routeKeys.size !== routeCells.length) {
+      throw new SaveValidationError(`Courier van ${index} route repeats a cell.`);
+    }
+    for (let cellIndex = 1; cellIndex < routeCells.length; cellIndex += 1) {
+      const previous = routeCells[cellIndex - 1]!;
+      const current = routeCells[cellIndex]!;
+      if (Math.abs(current.x - previous.x) + Math.abs(current.y - previous.y) !== 1) {
+        throw new SaveValidationError(`Courier van ${index} route is not orthogonally connected.`);
+      }
+    }
+
+    const routeIndex = assertNonNegativeInteger(item['routeIndex'], `Courier van ${index} route index is invalid.`);
+    if (routeIndex >= routeCells.length) {
+      throw new SaveValidationError(`Courier van ${index} route index is outside the route.`);
+    }
+    const progress = assertNonNegativeNumber(item['progress'], `Courier van ${index} progress is invalid.`);
+    if (progress > 1) {
+      throw new SaveValidationError(`Courier van ${index} progress is invalid.`);
+    }
+    const phase = item['phase'];
+    if (phase !== 'loading' && phase !== 'enroute' && phase !== 'unloading') {
+      throw new SaveValidationError(`Courier van ${index} phase is invalid.`);
+    }
+    const amount = assertPositiveNumber(item['amount'], `Courier van ${index} cargo is invalid.`);
+    if (amount > COURIER_VAN_CAPACITY) {
+      throw new SaveValidationError(`Courier van ${index} cargo exceeds capacity.`);
+    }
+    return {
+      id,
+      transferId,
+      sourceMineId: assertNonEmptyString(item['sourceMineId'], `Courier van ${index} source is invalid.`),
+      destinationWarehouseId: assertNonEmptyString(
+        item['destinationWarehouseId'],
+        `Courier van ${index} destination is invalid.`,
+      ),
+      resourceKind: assertMineralResourceKind(
+        item['resourceKind'],
+        `Courier van ${index} resource is invalid.`,
+      ),
+      amount,
+      route: routeCells,
+      routeIndex,
+      progress,
+      phase,
+      phaseRemainingSeconds: assertNonNegativeNumber(
+        item['phaseRemainingSeconds'],
+        `Courier van ${index} phase timer is invalid.`,
+      ),
+    };
+  });
 }
 
 function validateClearedCellIndices(
@@ -538,6 +659,32 @@ function validateMineralProductionState(value: unknown): WorldSession['gameplay'
     throw new SaveValidationError('The production transfer state is invalid.');
   }
 
+  const transfers = raw['transfers'].map((transfer, index) => {
+    const item = asRecord(transfer, `Production transfer ${index} is invalid.`);
+    const statusValue = item['status'];
+    if (statusValue !== 'pending' && statusValue !== 'delivered' && statusValue !== 'cancelled') {
+      throw new SaveValidationError(`Production transfer ${index} status is invalid.`);
+    }
+    const status: TransferStatus = statusValue;
+    return {
+      id: assertNonEmptyString(item['id'], `Production transfer ${index} ID is invalid.`),
+      sourceMineId: assertNonEmptyString(item['sourceMineId'], `Production transfer ${index} source is invalid.`),
+      destinationWarehouseId: assertNonEmptyString(
+        item['destinationWarehouseId'],
+        `Production transfer ${index} destination is invalid.`,
+      ),
+      resourceKind: assertMineralResourceKind(item['resourceKind'], `Production transfer ${index} resource is invalid.`),
+      amount: assertPositiveNumber(item['amount'], `Production transfer ${index} amount is invalid.`),
+      status,
+    };
+  });
+  const completedDeliveryCount = raw['completedDeliveryCount'] === undefined
+    ? transfers.filter((transfer) => transfer.status === 'delivered').length
+    : assertNonNegativeInteger(
+      raw['completedDeliveryCount'],
+      'The completed delivery count is invalid.',
+    );
+
   return {
     tick,
     deposits: raw['deposits'].map((deposit, index) => {
@@ -561,7 +708,11 @@ function validateMineralProductionState(value: unknown): WorldSession['gameplay'
         mineBuildingId: assertNonEmptyString(item['mineBuildingId'], `Production mine ${index} ID is invalid.`),
         depositId: assertNonNegativeInteger(item['depositId'], `Production mine ${index} deposit is invalid.`),
         resourceKind: assertMineralResourceKind(item['resourceKind'], `Production mine ${index} resource is invalid.`),
-        outputBuffer: assertNonNegativeNumber(item['outputBuffer'], `Production mine ${index} buffer is invalid.`),
+        outputBuffer: assertBoundedNonNegativeNumber(
+          item['outputBuffer'],
+          MAX_MINERAL_OUTPUT_BUFFER,
+          `Production mine ${index} buffer is invalid.`,
+        ),
         assignedWarehouseId,
         producedTotal: assertNonNegativeNumber(item['producedTotal'], `Production mine ${index} production total is invalid.`),
         deliveredTotal: assertNonNegativeNumber(item['deliveredTotal'], `Production mine ${index} delivery total is invalid.`),
@@ -581,24 +732,8 @@ function validateMineralProductionState(value: unknown): WorldSession['gameplay'
         ])) as WorldSession['gameplay']['production']['warehouses'][number]['quantities'],
       };
     }),
-    transfers: raw['transfers'].map((transfer, index) => {
-      const item = asRecord(transfer, `Production transfer ${index} is invalid.`);
-      const status = item['status'];
-      if (status !== 'pending' && status !== 'delivered' && status !== 'cancelled') {
-        throw new SaveValidationError(`Production transfer ${index} status is invalid.`);
-      }
-      return {
-        id: assertNonEmptyString(item['id'], `Production transfer ${index} ID is invalid.`),
-        sourceMineId: assertNonEmptyString(item['sourceMineId'], `Production transfer ${index} source is invalid.`),
-        destinationWarehouseId: assertNonEmptyString(
-          item['destinationWarehouseId'],
-          `Production transfer ${index} destination is invalid.`,
-        ),
-        resourceKind: assertMineralResourceKind(item['resourceKind'], `Production transfer ${index} resource is invalid.`),
-        amount: assertPositiveNumber(item['amount'], `Production transfer ${index} amount is invalid.`),
-        status,
-      };
-    }),
+    completedDeliveryCount,
+    transfers,
   };
 }
 
@@ -753,6 +888,14 @@ function assertFiniteNumber(value: unknown, message: string): number {
 function assertNonNegativeNumber(value: unknown, message: string): number {
   const numberValue = assertFiniteNumber(value, message);
   if (numberValue < 0) {
+    throw new SaveValidationError(message);
+  }
+  return numberValue;
+}
+
+function assertBoundedNonNegativeNumber(value: unknown, maximum: number, message: string): number {
+  const numberValue = assertNonNegativeNumber(value, message);
+  if (numberValue > maximum) {
     throw new SaveValidationError(message);
   }
   return numberValue;

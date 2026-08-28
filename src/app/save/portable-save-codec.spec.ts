@@ -9,6 +9,8 @@ import {
   createSaveGame,
   createWorldSession,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+  MAX_MINERAL_OUTPUT_BUFFER,
   SAVE_GAME_SCHEMA_VERSION,
 } from './save-contract';
 import {
@@ -138,6 +140,71 @@ describe('portable save codec', () => {
     expect(parsed.world.gameplay.production).toEqual(production);
   });
 
+  it('round-trips an active courier van with route progress', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'vehicle-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_108,
+    );
+    const production = {
+      ...world.gameplay.production,
+      mines: [{
+        mineBuildingId: 'mine-1',
+        depositId: 1,
+        resourceKind: 'iron-ore' as const,
+        outputBuffer: 0,
+        assignedWarehouseId: 'warehouse-1',
+        producedTotal: 10,
+        deliveredTotal: 0,
+      }],
+      warehouses: [{
+        warehouseBuildingId: 'warehouse-1',
+        quantities: { 'iron-ore': 0, 'copper-ore': 0, stone: 0 },
+      }],
+      transfers: [{
+        id: 'transfer-vehicle-1',
+        sourceMineId: 'mine-1',
+        destinationWarehouseId: 'warehouse-1',
+        resourceKind: 'iron-ore' as const,
+        amount: 10,
+        status: 'pending' as const,
+      }],
+    };
+    const vehicle = {
+      id: 'courier-van-vehicle-1',
+      transferId: 'transfer-vehicle-1',
+      sourceMineId: 'mine-1',
+      destinationWarehouseId: 'warehouse-1',
+      resourceKind: 'iron-ore' as const,
+      amount: 10,
+      route: [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+      routeIndex: 0,
+      progress: 0.4,
+      phase: 'enroute' as const,
+      phaseRemainingSeconds: 0,
+    };
+    const parsed = parsePortableSaveFile(serializeSaveGame(createSaveGame(
+      'vehicle-save',
+      {
+        ...world,
+        gameplay: {
+          ...world.gameplay,
+          production,
+          vehicles: [vehicle],
+        },
+      },
+      'Vehicle World',
+      'manual',
+    )));
+
+    expect(parsed.world.gameplay.vehicles).toEqual([vehicle]);
+    expect(parsed.world.gameplay.production.transfers[0]?.status).toBe('pending');
+  });
+
   it('migrates a version-one portable file to a named manual save', () => {
     const world = createWorldSession(
       {
@@ -253,6 +320,94 @@ describe('portable save codec', () => {
     expect(parsed.world.gameplay.clearedCellIndices).toEqual([]);
   });
 
+  it('migrates a version-five portable file with an empty vehicle list', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'legacy-v5-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_109,
+    );
+    const current = JSON.parse(serializeSaveGame(createSaveGame(
+      'legacy-v5-save',
+      { ...world, gameplay: { ...world.gameplay, vehicles: [] } },
+      'Legacy v5 World',
+      'manual',
+    ))) as Record<string, any>;
+    current['schemaVersion'] = LEGACY_SAVE_GAME_SCHEMA_VERSION_V5;
+    delete current['world']['gameplay']['vehicles'];
+    current['world']['gameplay']['production']['transfers'] = [{
+      id: 'legacy-delivered-transfer',
+      sourceMineId: 'legacy-mine-1',
+      destinationWarehouseId: 'legacy-warehouse-1',
+      resourceKind: 'iron-ore',
+      amount: 10,
+      status: 'delivered',
+    }];
+    delete current['world']['gameplay']['production']['completedDeliveryCount'];
+
+    const parsed = parsePortableSaveFile(JSON.stringify(current));
+
+    expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(parsed.world.gameplay.vehicles).toEqual([]);
+    expect(parsed.world.gameplay.production.completedDeliveryCount).toBe(1);
+  });
+
+  it('preserves cleared cells while migrating a version-five portable file', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'legacy-v5-cleared-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_110,
+    );
+    const current = JSON.parse(serializeSaveGame(createSaveGame(
+      'legacy-v5-cleared-save',
+      { ...world, gameplay: { ...world.gameplay, clearedCellIndices: [1] } },
+      'Legacy v5 Cleared World',
+      'manual',
+    ))) as Record<string, any>;
+    current['schemaVersion'] = LEGACY_SAVE_GAME_SCHEMA_VERSION_V5;
+    delete current['world']['gameplay']['vehicles'];
+
+    const parsed = parsePortableSaveFile(JSON.stringify(current));
+
+    expect(parsed.world.gameplay.clearedCellIndices).toEqual([1]);
+  });
+
+  it('rejects an output buffer that could trigger unbounded vehicle dispatch', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'invalid-buffer-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_111,
+    );
+    const current = JSON.parse(serializeSaveGame(createSaveGame(
+      'invalid-buffer-save',
+      world,
+      'Invalid Buffer World',
+      'manual',
+    ))) as Record<string, any>;
+    current['world']['gameplay']['production']['mines'] = [{
+      mineBuildingId: 'mine-1',
+      depositId: 1,
+      resourceKind: 'iron-ore',
+      outputBuffer: MAX_MINERAL_OUTPUT_BUFFER + 1,
+      assignedWarehouseId: null,
+      producedTotal: MAX_MINERAL_OUTPUT_BUFFER + 1,
+      deliveredTotal: 0,
+    }];
+
+    expect(() => parsePortableSaveFile(JSON.stringify(current))).toThrow(SaveValidationError);
+  });
+
   it('rejects future schemas, malformed base64, and wrong typed-array lengths', () => {
     const world = createWorldSession(
       {
@@ -315,6 +470,27 @@ describe('portable save codec', () => {
       { cell: { x: 0, y: 0 } },
     ];
     expect(() => parsePortableSaveFile(JSON.stringify(invalidRoads))).toThrow(SaveValidationError);
+
+    const invalidRoute = JSON.parse(serializeSaveGame(createSaveGame(
+      'invalid-save-5',
+      world,
+      'Invalid World',
+      'manual',
+    ))) as Record<string, any>;
+    invalidRoute['world']['gameplay']['vehicles'] = [{
+      id: 'courier-van-invalid',
+      transferId: 'transfer-invalid',
+      sourceMineId: 'mine-1',
+      destinationWarehouseId: 'warehouse-1',
+      resourceKind: 'iron-ore',
+      amount: 10,
+      route: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+      routeIndex: 0,
+      progress: 0,
+      phase: 'enroute',
+      phaseRemainingSeconds: 0,
+    }];
+    expect(() => parsePortableSaveFile(JSON.stringify(invalidRoute))).toThrow(SaveValidationError);
   });
 });
 
