@@ -710,3 +710,12 @@ The second revised sunset concept is the approved visual target. It defines the 
 - Added Load Save slot management, Continue restoration, manual Save World, five-minute Autosave, explicit-leave persistence, import name conflict handling, and visible storage/validation errors.
 - Verification: application TypeScript, spec TypeScript, e2e TypeScript, and `git diff --check` pass. Focused Angular unit execution remains blocked by the known local Angular builder exit 134 during `Building...`; local browser smoke checks reached Load Save, empty state, and missing-Continue fallback with no console errors.
 - Manual approval status: pending review of Autosave creation, named save round-trip, Continue after reload, export/delete/import, and protected Autosave behavior. No files were staged, committed, or pushed by the assistant.
+
+### 2026-08-28 — Blender-first vehicle authoring
+
+- **Decision:** Treat `art/vehicles/courier_van.blend` as the authoritative, manually editable vehicle source. Use Python for export, validation, review renders, diagnostics, and targeted patches against the existing scene.
+- **Selected direction:** Blender-first authoring with a procedural bootstrap retained for historical rebuilds.
+- **Rejected alternative:** Python-first authoring was rejected for the active vehicle workflow because it would make detailed manual modelling edits difficult to preserve and review.
+- **Important constraint:** `tools/blender/author_courier_van.py` clears and rebuilds the scene, so it must not be run after manual edits unless intentionally restarting from the procedural recipe. Normal collaboration uses `build_courier_van.py` and `render_courier_van_preview.py` against the saved `.blend`.
+- **Follow-up:** Any future scripted geometry change should be implemented as a targeted, non-destructive patch and validated against the existing stable object, marker, material, and bounds contract.
+- **Low-poly migration:** Replaced the Boolean-heavy generated body with a clean longitudinal cage intended for direct Blender editing. The migration retains the broad proportions, wheel arches, three primary material regions, wheels, root, and compatibility markers while intentionally removing fine exterior details for accurate manual reconstruction.

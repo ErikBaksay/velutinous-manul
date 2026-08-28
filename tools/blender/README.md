@@ -21,3 +21,46 @@ The script validates the classical shaft-house mine's 15×6 bounds, facade-openi
 clearances, generated tower resource anchor, stable LOD names, and triangle ceilings before export. Blender
 5.1.1 was used for the first mine export. A portable Blender install may be
 invoked by its absolute executable path when `blender` is not on `PATH`.
+
+## Panoramic courier van
+
+The vehicle source of truth is the authored Blender scene. The project uses a
+Blender-first workflow: edit `art/vehicles/courier_van.blend` in Blender, then
+use the export script to validate that scene and write the runtime GLB. The
+authoring script is retained as the original procedural bootstrap, but it is
+not part of the normal edit loop because it rebuilds the scene from scratch.
+
+Initial bootstrap, export, and review commands:
+
+```bash
+# Rebuild-from-scratch bootstrap; refuses to replace an existing source unless
+# --force is explicitly added. Do not use after manual Blender edits.
+blender --background --python tools/blender/author_courier_van.py
+
+# One-time migration from the old detailed source to the editable low-poly cage.
+blender --background art/vehicles/courier_van.blend \
+  --python tools/blender/simplify_courier_van.py -- \
+  --output art/vehicles/courier_van.blend --force
+
+# Normal workflow after editing the .blend in Blender.
+blender --background art/vehicles/courier_van.blend \
+  --python tools/blender/build_courier_van.py
+blender --background art/vehicles/courier_van.blend \
+  --python tools/blender/render_courier_van_preview.py
+```
+
+The validator writes the self-contained `public/assets/vehicles/courier_van.glb`,
+checks the stable root/marker contract, verifies the body material regions and
+bounds, and validates a clean GLB re-import. The render command writes the
+fixed design-review renders documented in `art/vehicles/README.md`.
+
+Blender scene files are binary and should not be edited concurrently. The
+bootstrap and simplification commands are historical/recovery tools, not part
+of normal authoring, and both refuse source replacement unless explicitly
+forced. The build and render commands read the `.blend`; they do not save over
+it. Future scripted geometry changes must use targeted patch scripts that load
+and preserve the existing `.blend` unless the team has explicitly chosen to
+discard manual edits.
+
+The four visual authorities are kept in `art/vehicles/references/`.  They are
+reference images only; they are not loaded as runtime textures.
