@@ -81,3 +81,29 @@ blender --background art/buildings/church/church.blend \
 The church remains an exterior architectural master during visual approval.
 Runtime GLB export, LOD generation, collision, footprint selection, and game
 registration are intentionally deferred.
+
+## Residential Building 01 exterior master
+
+The first residential building follows the same Blender-first ownership model.
+Its editable source is `art/buildings/residential_01/residential_01.blend`; the
+bootstrap is a one-time/recovery helper and refuses to replace the source unless
+`--force` is explicitly supplied.
+
+```bash
+blender --background --factory-startup \
+  --python tools/blender/author_residential_01.py
+blender --background art/buildings/residential_01/residential_01.blend \
+  --python tools/blender/render_residential_01_preview.py
+```
+
+The proportion blockout was approved on 2026-08-29.  The current source is the
+primary-architecture approval gate: the rooftop service box has been removed,
+and the scene now contains the complete four-front/rear and three-side window
+rhythm, storefront/entrance system, cladding joints, wall lights, and rounded
+penthouse terrace railing.  The initially authored window-mounted guards were
+subsequently removed from every window by user direction; only the penthouse
+terrace railing remains.  The guarded transition script is
+`tools/blender/advance_residential_01_primary_architecture.py`; it has already
+been applied and must not be rerun over the advanced source.  Attached planters,
+vegetation, and final surface tuning remain deferred until this gate is
+approved.  Runtime export and game integration are separate future work.
