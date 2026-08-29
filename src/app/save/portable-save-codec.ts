@@ -9,6 +9,10 @@ import {
   ResourceKind,
 } from '../map/map-types';
 import {
+  VELUTINOUS_MANUL_CHURCH_DEFINITION_ID,
+  VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID,
+} from '../construction';
+import {
   createEmptyMineralProductionState,
   createFallbackImportedSlotName,
   createUpdatedWorldSession,
@@ -19,6 +23,7 @@ import {
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V6,
   SaveGame,
   SaveSlotKind,
   SAVE_GAME_FORMAT,
@@ -120,6 +125,7 @@ export function parsePortableSaveFile(content: string): SaveGame {
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V6 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError(`Save schema version ${schemaVersion} is not supported.`);
   }
@@ -130,6 +136,7 @@ export function parsePortableSaveFile(content: string): SaveGame {
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V6,
     schemaVersion >= SAVE_GAME_SCHEMA_VERSION,
   );
 
@@ -173,6 +180,7 @@ export function validateSaveGame(value: unknown): SaveGame {
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
       schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 &&
+      schemaVersion !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V6 &&
       schemaVersion !== SAVE_GAME_SCHEMA_VERSION) {
     throw new SaveValidationError('The stored save uses an unsupported schema version.');
   }
@@ -184,6 +192,7 @@ export function validateSaveGame(value: unknown): SaveGame {
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
     schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+    schemaVersion >= LEGACY_SAVE_GAME_SCHEMA_VERSION_V6,
     schemaVersion >= SAVE_GAME_SCHEMA_VERSION,
   );
   return {
@@ -233,6 +242,7 @@ function decodeWorld(
   includeRoads: boolean,
   includeClearedCells: boolean,
   includeVehicles: boolean,
+  includeTowns: boolean,
 ): WorldSession {
   const raw = asRecord(value, 'The save world is missing or invalid.');
   const map = asRecord(raw['map'], 'The save map is missing or invalid.');
@@ -257,11 +267,12 @@ function decodeWorld(
       includeRoads,
       includeClearedCells,
       includeVehicles,
+      includeTowns,
       configuration.width,
       configuration.height,
     ),
   };
-  return validateWorld(world, includeProduction, includeRoads, includeClearedCells, includeVehicles);
+  return validateWorld(world, includeProduction, includeRoads, includeClearedCells, includeVehicles, includeTowns);
 }
 
 function validateWorld(
@@ -270,6 +281,7 @@ function validateWorld(
   includeRoads: boolean,
   includeClearedCells: boolean,
   includeVehicles: boolean,
+  includeTowns: boolean,
 ): WorldSession {
   const raw = asRecord(value, 'The world session is missing or invalid.');
   const map = asRecord(raw['map'], 'The world map is missing or invalid.');
@@ -294,6 +306,7 @@ function validateWorld(
       includeRoads,
       includeClearedCells,
       includeVehicles,
+      includeTowns,
       configuration.width,
       configuration.height,
     ),
@@ -435,10 +448,11 @@ function decodeGameplay(
   includeRoads: boolean,
   includeClearedCells: boolean,
   includeVehicles: boolean,
+  includeTowns: boolean,
   width: number,
   height: number,
 ): WorldSession['gameplay'] {
-  return validateGameplay(value, includeProduction, includeRoads, includeClearedCells, includeVehicles, width, height);
+  return validateGameplay(value, includeProduction, includeRoads, includeClearedCells, includeVehicles, includeTowns, width, height);
 }
 
 function validateGameplay(
@@ -447,6 +461,7 @@ function validateGameplay(
   includeRoads: boolean,
   includeClearedCells: boolean,
   includeVehicles: boolean,
+  includeTowns: boolean,
   width: number,
   height: number,
 ): WorldSession['gameplay'] {
@@ -472,9 +487,14 @@ function validateGameplay(
       }
     }
   }
-  return {
-    placedBuildings: raw['placedBuildings'].map((building, index) => {
+  const placedBuildingIds = new Set<string>();
+  const placedBuildings = raw['placedBuildings'].map((building, index) => {
       const item = asRecord(building, `Placed building ${index} is invalid.`);
+      const id = assertNonEmptyString(item['id'], `Placed building ${index} ID is invalid.`);
+      if (placedBuildingIds.has(id)) {
+        throw new SaveValidationError(`Placed building ${index} duplicates another building ID.`);
+      }
+      placedBuildingIds.add(id);
       const rotation = assertInteger(
         item['rotationQuarterTurns'],
         `Placed building ${index} rotation is invalid.`,
@@ -484,7 +504,7 @@ function validateGameplay(
       }
       const origin = asRecord(item['origin'], `Placed building ${index} origin is invalid.`);
       return {
-        id: assertNonEmptyString(item['id'], `Placed building ${index} ID is invalid.`),
+        id,
         definitionId: assertNonEmptyString(
           item['definitionId'],
           `Placed building ${index} definition is invalid.`,
@@ -495,7 +515,10 @@ function validateGameplay(
         },
         rotationQuarterTurns: rotation as 0 | 1 | 2 | 3,
       };
-    }),
+    });
+  return {
+    placedBuildings,
+    towns: includeTowns ? validateTowns(raw['towns'], placedBuildings) : [],
     roads: includeRoads
       ? validateRoads(raw['roads'], width, height)
       : [],
@@ -618,6 +641,77 @@ function validateClearedCellIndices(
     seen.add(parsed);
     return parsed;
   }).sort((left, right) => left - right);
+}
+
+function validateTowns(
+  value: unknown,
+  placedBuildings: readonly WorldSession['gameplay']['placedBuildings'][number][],
+): WorldSession['gameplay']['towns'] {
+  if (!Array.isArray(value)) {
+    throw new SaveValidationError('The town state is invalid.');
+  }
+
+  const buildingById = new Map(placedBuildings.map((building) => [building.id, building]));
+  const townIds = new Set<string>();
+  const townNames = new Set<string>();
+  const claimedBuildingIds = new Set<string>();
+  return value.map((town, index) => {
+    const item = asRecord(town, `Town ${index} is invalid.`);
+    const id = assertNonEmptyString(item['id'], `Town ${index} ID is invalid.`);
+    if (townIds.has(id)) {
+      throw new SaveValidationError(`Town ${index} duplicates another town ID.`);
+    }
+    townIds.add(id);
+
+    const name = assertNonEmptyString(item['name'], `Town ${index} name is invalid.`);
+    if (name.length > 40) {
+      throw new SaveValidationError(`Town ${index} name is too long.`);
+    }
+    const normalizedName = name.toLocaleLowerCase();
+    if (townNames.has(normalizedName)) {
+      throw new SaveValidationError(`Town ${index} duplicates another town name.`);
+    }
+    townNames.add(normalizedName);
+
+    const churchBuildingId = assertNonEmptyString(
+      item['churchBuildingId'],
+      `Town ${index} church reference is invalid.`,
+    );
+    const church = buildingById.get(churchBuildingId);
+    if (!church || church.definitionId !== VELUTINOUS_MANUL_CHURCH_DEFINITION_ID) {
+      throw new SaveValidationError(`Town ${index} church reference is invalid.`);
+    }
+    if (claimedBuildingIds.has(churchBuildingId)) {
+      throw new SaveValidationError(`Town ${index} reuses a claimed building.`);
+    }
+    claimedBuildingIds.add(churchBuildingId);
+
+    if (!Array.isArray(item['residentialBuildingIds'])) {
+      throw new SaveValidationError(`Town ${index} residential references are invalid.`);
+    }
+    const residentialBuildingIds = item['residentialBuildingIds'].map((buildingId, residentialIndex) => {
+      const parsedId = assertNonEmptyString(
+        buildingId,
+        `Town ${index} residence ${residentialIndex} reference is invalid.`,
+      );
+      const residence = buildingById.get(parsedId);
+      if (!residence || residence.definitionId !== VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID) {
+        throw new SaveValidationError(`Town ${index} residence reference is invalid.`);
+      }
+      if (claimedBuildingIds.has(parsedId)) {
+        throw new SaveValidationError(`Town ${index} reuses a claimed building.`);
+      }
+      claimedBuildingIds.add(parsedId);
+      return parsedId;
+    }).sort();
+
+    return {
+      id,
+      name,
+      churchBuildingId,
+      residentialBuildingIds,
+    };
+  });
 }
 
 function validateRoads(value: unknown, width: number, height: number): WorldSession['gameplay']['roads'] {

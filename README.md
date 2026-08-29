@@ -26,6 +26,17 @@ The camera intentionally stays between 40° and 88° elevation and uses a map-sa
 
 The world-settings dock can be hidden while exploring and reopened with the **World settings** button.
 
+## Construction and town founding
+
+The Construction palette includes Mine, Warehouse, Church, Residence, and Road.
+Place a church on strict-buildable land, then place a residence within its
+inclusive 8-cell edge-to-edge Chebyshev influence area. Select the church or
+residence and choose **Found Town** to name the settlement. Each residence adds
+10 population capacity and 10 worker capacity; connected residences can extend
+the town's influence. Roads and services are not required for this first slice,
+overlapping town placement is rejected, and a founded church is protected from
+demolition.
+
 ## Rendering quality
 
 The default renderer uses the balanced performance preset: direct rendering, capped device pixel ratio, terrain-only shadows, bounded environment density, and distance-based environment LODs. Optional presets can be selected with the query string:

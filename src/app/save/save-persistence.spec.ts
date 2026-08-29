@@ -1,5 +1,5 @@
 import { AuthoritativeMapData, DEFAULT_MAP_CONFIG, MapSummary, RESOURCE_KINDS } from '../map/map-types';
-import { createWorldSession } from './save-contract';
+import { createWorldSession, type PlacedBuildingState, type TownState } from './save-contract';
 import { IndexedDbSaveRepository, SAVE_DATABASE_NAME } from './indexeddb-save-repository';
 import { LastActiveSaveReference, LAST_ACTIVE_SAVE_STORAGE_KEY } from './last-active-save';
 import { SaveNameConflictError, SavePersistenceService } from './save-persistence';
@@ -53,6 +53,50 @@ describe('SavePersistenceService', () => {
     expect(imported.world.map.generationSummary.mapIdentity).toBe(
       world.map.generationSummary.mapIdentity,
     );
+    await deleteDatabase(databaseName);
+  });
+
+  it('saves a founded town with two residences through manual and autosave paths', async () => {
+    const databaseName = `${SAVE_DATABASE_NAME}-town-${crypto.randomUUID()}`;
+    const service = new SavePersistenceService(
+      new IndexedDbSaveRepository(databaseName),
+      new LastActiveSaveReference(),
+    );
+    const world = createWorld();
+    const church: PlacedBuildingState = {
+      id: 'velutinous-manul-church-1',
+      definitionId: 'velutinous-manul-church',
+      origin: { x: 0, y: 0 },
+      rotationQuarterTurns: 0,
+    };
+    const residences: PlacedBuildingState[] = [1, 2].map((ordinal) => ({
+      id: `velutinous-manul-residential-01-${ordinal}`,
+      definitionId: 'velutinous-manul-residential-01',
+      origin: { x: ordinal, y: 0 },
+      rotationQuarterTurns: 0,
+    }));
+    const town: TownState = {
+      id: 'town-1',
+      name: 'Pinewatch',
+      churchBuildingId: church.id,
+      residentialBuildingIds: residences.map((residence) => residence.id),
+    };
+    const townWorld = {
+      ...world,
+      gameplay: {
+        ...world.gameplay,
+        placedBuildings: [church, ...residences],
+        towns: [town],
+      },
+    };
+
+    const autosave = await service.saveAutosave(townWorld);
+    const manual = await service.saveManual(townWorld, 'Pinewatch Town');
+    const loaded = await service.loadSave(manual.saveId);
+
+    expect(autosave.world.gameplay.towns[0]?.residentialBuildingIds).toHaveLength(2);
+    expect(manual.world.gameplay.placedBuildings).toHaveLength(3);
+    expect(loaded?.world.gameplay.towns).toEqual([town]);
     await deleteDatabase(databaseName);
   });
 });

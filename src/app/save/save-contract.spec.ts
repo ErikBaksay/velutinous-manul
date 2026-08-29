@@ -43,6 +43,7 @@ describe('save contract', () => {
     expect(session.map.authoritativeData.heightSamples).toBeInstanceOf(Uint16Array);
     expect(session.map.authoritativeData.heightSamples[0]).toBe(321);
     expect(session.gameplay.placedBuildings).toEqual([]);
+    expect(session.gameplay.towns).toEqual([]);
     expect(session.gameplay.roads).toEqual([]);
     expect(session.gameplay.clearedCellIndices).toEqual([]);
   });
@@ -169,6 +170,34 @@ describe('save contract', () => {
     expect(cloned.world.gameplay.placedBuildings).toEqual(placedBuildings);
     expect(cloned.world.gameplay.roads).toEqual(roads);
     expect(cloned.world.gameplay.clearedCellIndices).toEqual(clearedCellIndices);
+  });
+
+  it('preserves town membership through structured cloning', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'session-006',
+        mapConfig: DEFAULT_MAP_CONFIG,
+        mapSummary: createMapSummary(DEFAULT_MAP_CONFIG.seed),
+        mapData: createMapData(),
+      },
+      1_753_000_000_005,
+    );
+    const towns = [{
+      id: 'town-1',
+      name: 'Harbor',
+      churchBuildingId: 'church-1',
+      residentialBuildingIds: ['residence-1'],
+    }];
+    const cloned = structuredClone(createSaveGame(
+      'save-006',
+      { ...world, gameplay: { ...world.gameplay, towns } },
+      'Town World',
+      'manual',
+    ));
+
+    expect(cloned.world.gameplay.towns).toEqual(towns);
+    expect(cloned.world.gameplay.towns).not.toBe(towns);
+    expect(cloned.world.gameplay.towns[0]?.residentialBuildingIds).not.toBe(towns[0]!.residentialBuildingIds);
   });
 });
 

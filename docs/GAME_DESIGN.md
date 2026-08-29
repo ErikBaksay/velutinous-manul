@@ -190,6 +190,32 @@ Founding a town is an explicit player action that turns these buildings into a
 named settlement with a visible center and room to grow. The first version
 should not simulate individual citizens or require a full service economy.
 
+The first playable rules are deliberately concrete:
+
+- Church footprint: `7×14` cells. Residential Building 01 footprint: `10×8`
+  cells. Both use the strict land-placement policy already used by the other
+  construction tools.
+- A residence is in an influence area when the closest cells of its footprint
+  and the anchor footprint are at most 8 cells apart using Chebyshev distance.
+  The boundary counts, and the distance is edge-to-edge rather than origin to
+  origin.
+- A residence may be placed only inside exactly one unfounded church area or
+  exactly one founded-town network. A placement overlapping multiple churches,
+  towns, or both is rejected. Roads are not required.
+- Founding claims the church and every currently unassigned residence that
+  qualifies for that church. A church can anchor one town only, while a world
+  can contain multiple towns; towns never merge automatically.
+- After founding, each residence extends the town's influence by the same
+  8-cell radius. This permits connected, chained residential growth without
+  requiring roads, services, citizens, or an economy.
+- Each residence contributes `10` population capacity and `10` worker
+  capacity. Removing a residence removes its membership and capacity. A
+  founded church with related residences cannot be demolished; after the last
+  residence is removed, the empty town remains available for rebuilding and
+  its church may also be removed.
+- Town names are trimmed, non-empty, at most 40 characters, and unique without
+  regard to case. The naming form suggests `Town N`.
+
 The intended spatial composition is a traditional church and small plaza at
 the center, residential buildings around it, roads connecting the settlement
 to the wider logistics network, and industrial or warehouse buildings kept

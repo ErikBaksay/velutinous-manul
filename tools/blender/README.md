@@ -18,9 +18,19 @@ future houses, factories, roads, bridges, and vehicles within the same naming,
 scale, origin, and material conventions described in `art/environment/README.md`.
 
 The script validates the classical shaft-house mine's 15×6 bounds, facade-opening
-clearances, generated tower resource anchor, stable LOD names, and triangle ceilings before export. Blender
-5.1.1 was used for the first mine export. A portable Blender install may be
-invoked by its absolute executable path when `blender` is not on `PATH`.
+clearances, generated tower resource anchor, stable LOD names, and triangle ceilings before export. It
+also imports the current church and Residential Building 01 masters and emits
+the stable `church_lod0/1` and `residential_01_lod0/1` runtime IDs. The current
+settlement masters are authored at architectural metric scale, then the export
+applies a uniform `0.5×` gameplay calibration to both LODs. The resulting
+runtime footprint-facing bounds are approximately `6.4×14.0 m` for the church
+and `9.27×7.02 m` for Residential Building 01, with visual heights of `13.56 m`
+and `7.86 m`. Their logical construction footprints are `7×14` and
+`10×8`; the integer grid footprint rounds each calibrated visual bound up so
+the occupancy mask does not extend beyond the model's lot. Blender 5.1.1 was
+used for the export. A portable
+Blender install may be invoked by its absolute executable path when `blender`
+is not on `PATH`.
 
 ## Panoramic courier van
 
@@ -78,9 +88,10 @@ blender --background art/buildings/church/church.blend \
   --python tools/blender/render_church_preview.py
 ```
 
-The church remains an exterior architectural master during visual approval.
-Runtime GLB export, LOD generation, collision, footprint selection, and game
-registration are intentionally deferred.
+The church remains an exterior architectural master, and the current master is
+now integrated into the runtime export as `church_lod0` and `church_lod1`.
+Gameplay uses a separate `7×14` footprint; collision is represented by the
+construction grid rather than authored physics.
 
 ## Residential Building 01 exterior master
 
@@ -106,4 +117,7 @@ terrace railing remains.  The guarded transition script is
 `tools/blender/advance_residential_01_primary_architecture.py`; it has already
 been applied and must not be rerun over the advanced source.  Attached planters,
 vegetation, and final surface tuning remain deferred until this gate is
-approved.  Runtime export and game integration are separate future work.
+approved. The current master is integrated into the runtime export as
+`residential_01_lod0` and `residential_01_lod1`; gameplay uses a separate
+strict-land `10×8` construction footprint and grid occupancy supplies
+collision for this first settlement slice.

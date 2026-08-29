@@ -34,7 +34,9 @@ export type PlacementFailureCode =
   | 'slope-too-steep'
   | 'occupied'
   | 'road-occupied'
-  | 'missing-mineral-deposit';
+  | 'missing-mineral-deposit'
+  | 'outside-town-influence'
+  | 'ambiguous-town-influence';
 
 export interface PlacementFailure {
   readonly code: PlacementFailureCode;

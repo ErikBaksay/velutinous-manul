@@ -313,6 +313,240 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await expect(page.getByTestId(`warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`)).toContainText('0');
   });
 
+  test('founds a named town, grows it through chained residence influence, and protects its church until empty', async ({ page }) => {
+    await prepareInitialWorld(page);
+    await page.getByRole('button', { name: /Accept World/ }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await waitForStreamingSettled(page);
+    await pauseSimulation(page);
+
+    const placement = await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: { getComponent?: (element: Element) => any; applyChanges?: (component: any) => void };
+      }).ng;
+      const host = document.querySelector('app-world-session');
+      const component = host && angular?.getComponent?.(host);
+      if (!component) {
+        throw new Error('The browser town flow could not locate the world-session component.');
+      }
+      const width = component.world.map.configuration.width;
+      const height = component.world.map.configuration.height;
+      const startingCell = component.world.map.generationSummary.startingCell;
+      const center = {
+        x: startingCell % width,
+        y: Math.floor(startingCell / width),
+      };
+      const spiral = (radius: number): { x: number; y: number }[] => {
+        const cells: { x: number; y: number }[] = [];
+        for (let distance = 0; distance <= radius; distance += 1) {
+          for (let y = center.y - distance; y <= center.y + distance; y += 1) {
+            for (let x = center.x - distance; x <= center.x + distance; x += 1) {
+              if (Math.max(Math.abs(x - center.x), Math.abs(y - center.y)) !== distance) {
+                continue;
+              }
+              cells.push({ x, y });
+            }
+          }
+        }
+        return cells;
+      };
+      const around = (anchor: { x: number; y: number }, radius: number): { x: number; y: number }[] => {
+        const cells: { x: number; y: number }[] = [];
+        for (let distance = 0; distance <= radius; distance += 1) {
+          for (let y = anchor.y - distance; y <= anchor.y + distance; y += 1) {
+            for (let x = anchor.x - distance; x <= anchor.x + distance; x += 1) {
+              if (Math.max(Math.abs(x - anchor.x), Math.abs(y - anchor.y)) === distance) {
+                cells.push({ x, y });
+              }
+            }
+          }
+        }
+        return cells;
+      };
+      component.activateChurchTool();
+      const churchOrigin = spiral(42).find((origin) =>
+        component['validateBuilding']('velutinous-manul-church', origin).valid,
+      );
+      if (!churchOrigin) {
+        throw new Error('The browser town flow could not find a buildable church location.');
+      }
+      component['placeBuilding'](churchOrigin);
+      const church = component.world.gameplay.placedBuildings.find((building: any) =>
+        building.definitionId === 'velutinous-manul-church',
+      );
+      if (!church) {
+        throw new Error('The browser town flow could not find the placed church.');
+      }
+
+      component.activateResidentialTool();
+      const firstResidenceOrigin = {
+        x: church.origin.x + 14,
+        y: church.origin.y + 3,
+      };
+      const firstResidence = [firstResidenceOrigin, ...around(church.origin, 28)]
+        .find((origin) => component['validateBuilding']('velutinous-manul-residential-01', origin).valid);
+      if (!firstResidence) {
+        throw new Error('The browser town flow could not find a qualifying first residence.');
+      }
+      component['placeBuilding'](firstResidence);
+      const residence = component.world.gameplay.placedBuildings.find((building: any) =>
+        building.definitionId === 'velutinous-manul-residential-01',
+      );
+      if (!residence) {
+        throw new Error('The browser town flow could not find the placed residence.');
+      }
+      component['selectCell'](church.origin);
+      angular?.applyChanges?.(component);
+      return { church: church.id, firstResidence: residence.id };
+    });
+
+    await expect(page.getByTestId('found-town')).toBeEnabled();
+    await page.getByTestId('found-town').click();
+    await expect(page.getByTestId('town-name')).toHaveValue('Town 1');
+    await page.getByTestId('town-name').fill('Pinewatch');
+    await page.getByTestId('confirm-found-town').click();
+    await expect(page.getByTestId('selected-town-summary')).toContainText('Pinewatch');
+    await expect(page.getByTestId('town-population')).toContainText('10');
+
+    await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: { getComponent?: (element: Element) => any; applyChanges?: (component: any) => void };
+      }).ng;
+      const host = document.querySelector('app-world-session');
+      const component = host && angular?.getComponent?.(host);
+      if (!component) {
+        throw new Error('The browser town growth flow could not locate the component.');
+      }
+      const town = component.world.gameplay.towns[0];
+      const firstResidence = component.world.gameplay.placedBuildings.find((building: any) =>
+        building.id === town.residentialBuildingIds[0],
+      );
+      if (!firstResidence) {
+        throw new Error('The browser town growth flow could not locate the first residence.');
+      }
+      component.activateResidentialTool();
+      const footprint = (building: any): { x: number; y: number }[] => {
+        const definition = component['constructionDefinitions'].get(building.definitionId);
+        const cells: { x: number; y: number }[] = [];
+        for (let y = 0; y < definition.footprint.height; y += 1) {
+          for (let x = 0; x < definition.footprint.width; x += 1) {
+            cells.push({ x: building.origin.x + x, y: building.origin.y + y });
+          }
+        }
+        return cells;
+      };
+      const distance = (left: any, right: any): number => Math.min(...footprint(left).flatMap((a) =>
+        footprint(right).map((b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)))),
+      );
+      const target = { x: firstResidence.origin.x + 27, y: firstResidence.origin.y };
+      let secondResidence: { x: number; y: number } | undefined;
+      for (let y = target.y - 24; y <= target.y + 24 && !secondResidence; y += 1) {
+        for (let x = target.x - 24; x <= target.x + 24; x += 1) {
+          const candidate = { x, y };
+          const preview = {
+            id: 'preview',
+            definitionId: 'velutinous-manul-residential-01',
+            origin: candidate,
+            rotationQuarterTurns: 0,
+          };
+          const church = component.world.gameplay.placedBuildings.find((building: any) =>
+            building.id === town.churchBuildingId,
+          );
+          if (!church || distance(preview, firstResidence) > 8 || distance(preview, church) <= 8 ||
+              !component['validateBuilding']('velutinous-manul-residential-01', candidate).valid) {
+            continue;
+          }
+          secondResidence = candidate;
+          break;
+        }
+      }
+      if (!secondResidence) {
+        throw new Error('The browser town growth flow could not find a chained residence location.');
+      }
+      component['placeBuilding'](secondResidence);
+      angular?.applyChanges?.(component);
+    });
+    await expect(page.getByTestId('town-residence-count')).toContainText('2');
+    await expect(page.getByTestId('town-population')).toContainText('20');
+    await expect(page.getByTestId('town-worker-capacity')).toContainText('20');
+
+    await page.getByRole('button', { name: 'Save World', exact: true }).click();
+    await page.getByLabel('Save name').fill('Pinewatch Town');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.save-note')).toContainText('Saved Pinewatch Town');
+    await page.getByRole('button', { name: 'Leave World', exact: true }).click();
+    await page.getByRole('button', { name: /Load Save/ }).click();
+    const savedRow = page.locator('.save-row').filter({ hasText: 'Pinewatch Town' });
+    await savedRow.getByRole('button', { name: 'Load', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: { getComponent?: (element: Element) => any; applyChanges?: (component: any) => void };
+      }).ng;
+      const component = angular?.getComponent?.(document.querySelector('app-world-session')!);
+      if (component?.world?.gameplay?.towns?.[0]?.name !== 'Pinewatch' ||
+          component.world.gameplay.towns[0].residentialBuildingIds.length !== 2) {
+        throw new Error('The saved town did not survive the browser reload.');
+      }
+      component['selectCell'](component.world.gameplay.placedBuildings.find((building: any) =>
+        building.id === component.world.gameplay.towns[0].churchBuildingId,
+      ).origin);
+      angular?.applyChanges?.(component);
+    });
+    await page.getByRole('button', { name: 'Remove Selected Building', exact: true }).click();
+    await expect(page.locator('.placement-message')).toContainText('protected from demolition');
+
+    for (let index = 0; index < 2; index += 1) {
+      await page.evaluate((residenceIndex) => {
+        const angular = (window as unknown as {
+          ng?: { getComponent?: (element: Element) => any; applyChanges?: (component: any) => void };
+        }).ng;
+        const component = angular?.getComponent?.(document.querySelector('app-world-session')!);
+        const town = component?.world?.gameplay?.towns?.[0];
+        const residenceId = town?.residentialBuildingIds?.[residenceIndex];
+        const residence = residenceId && component.world.gameplay.placedBuildings.find((building: any) =>
+          building.id === residenceId,
+        );
+        if (!component || !residence) {
+          throw new Error('The browser town flow could not locate a residence for demolition.');
+        }
+        component['selectCell'](residence.origin);
+        angular?.applyChanges?.(component);
+      }, 0);
+      await page.getByRole('button', { name: 'Remove Selected Building', exact: true }).click();
+    }
+
+    await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: { getComponent?: (element: Element) => any; applyChanges?: (component: any) => void };
+      }).ng;
+      const component = angular?.getComponent?.(document.querySelector('app-world-session')!);
+      const town = component?.world?.gameplay?.towns?.[0];
+      const church = town && component.world.gameplay.placedBuildings.find((building: any) =>
+        building.id === town.churchBuildingId,
+      );
+      if (!component || !church || town.residentialBuildingIds.length !== 0) {
+        throw new Error('The browser town flow did not empty the town before church demolition.');
+      }
+      component['selectCell'](church.origin);
+      angular?.applyChanges?.(component);
+    });
+    await page.getByRole('button', { name: 'Remove Selected Building', exact: true }).click();
+    await expect(page.locator('.placement-message')).toContainText('Removed the selected church');
+    await page.evaluate(() => {
+      const angular = (window as unknown as {
+        ng?: { getComponent?: (element: Element) => any };
+      }).ng;
+      const component = angular?.getComponent?.(document.querySelector('app-world-session')!);
+      if (component?.world?.gameplay?.placedBuildings?.length !== 0 ||
+          component.world.gameplay.towns.length !== 0) {
+        throw new Error('The browser town flow left an empty church or town state behind.');
+      }
+    });
+    expect(placement.church).toContain('church');
+    expect(placement.firstResidence).toContain('residential');
+  });
+
   test('pauses the simulation and applies 2× and 4× speeds', async ({ page }) => {
     await prepareInitialWorld(page);
     await page.getByRole('button', { name: /Accept World/ }).click();

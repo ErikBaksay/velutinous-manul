@@ -12,6 +12,7 @@ import {
   type MineProductionState,
   type PlacedBuildingState,
   type RoadState,
+  type TownState,
   type WorldSession as WorldSessionData,
 } from './save/save-contract';
 import {
@@ -34,8 +35,20 @@ import {
   validateBuildingPlacement,
   validateRoadPlacement,
   VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+  VELUTINOUS_MANUL_CHURCH_DEFINITION_ID,
+  VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID,
   VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
+import {
+  addResidenceToTown,
+  createTownState,
+  evaluateResidentialPlacement,
+  evaluateTownFoundation,
+  getNextTownId,
+  getTownCapacity,
+  removeBuildingFromTowns,
+  validateTownName,
+} from './settlement';
 import { getRuntimeQueryParams } from './runtime-query';
 import {
   SaveActionError,
@@ -181,6 +194,16 @@ export function advanceSimulationClock(
             >Warehouse</button>
             <button
               type="button"
+              [class.is-active]="activeTool === 'church'"
+              (click)="activateChurchTool()"
+            >Church</button>
+            <button
+              type="button"
+              [class.is-active]="activeTool === 'residential'"
+              (click)="activateResidentialTool()"
+            >Residence</button>
+            <button
+              type="button"
               [class.is-active]="activeTool === 'road'"
               (click)="activateRoadTool()"
             >Road</button>
@@ -232,6 +255,14 @@ export function advanceSimulationClock(
             >Place at Starting Area</button>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
           }
+          @if (activeTool === 'church') {
+            <p class="tool-note">Place a church freely on buildable land. A church becomes a town anchor when you found the town.</p>
+            <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
+          }
+          @if (activeTool === 'residential') {
+            <p class="tool-note">Place a 10×8 residence inside exactly one church or founded-town influence area.</p>
+            <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
+          }
           @if (activeTool === 'road') {
             <p class="tool-note">Hover over land to preview a one-cell road segment.</p>
             <button class="secondary-action" type="button" (click)="cancelPlacement()">Cancel</button>
@@ -245,6 +276,30 @@ export function advanceSimulationClock(
             >{{ placementMessage }}</p>
           }
           @if (selectedBuilding) {
+            @if (selectedTown) {
+              <section class="production-card" data-testid="selected-town-summary">
+                <h3>{{ selectedTown.name }}</h3>
+                <p data-testid="town-population">Population capacity: {{ getTownCapacity(selectedTown).population }}</p>
+                <p data-testid="town-worker-capacity">Worker capacity: {{ getTownCapacity(selectedTown).workers }}</p>
+                <p data-testid="town-residence-count">Residences: {{ selectedTown.residentialBuildingIds.length }}</p>
+              </section>
+            }
+            @if (foundingChurch && foundationEvaluation) {
+              <button
+                type="button"
+                class="secondary-action"
+                data-testid="found-town"
+                (click)="openFoundTownDialog()"
+                [disabled]="!foundationEvaluation.valid"
+              >Found Town</button>
+              @if (!foundationEvaluation.valid) {
+                <p class="placement-message is-error" data-testid="found-town-feedback">
+                  {{ foundationEvaluation.failureCode === 'missing-residence'
+                    ? 'Place at least one qualifying residence before founding this town.'
+                    : 'This church cannot found a town.' }}
+                </p>
+              }
+            }
             @if (selectedMineProduction) {
               <section class="production-card" data-testid="selected-mine-production">
                 <h3>Mine production</h3>
@@ -298,6 +353,30 @@ export function advanceSimulationClock(
             </button>
           }
         </section>
+        @if (showTownFoundingDialog) {
+          <section class="save-dialog" aria-labelledby="town-dialog-title" data-testid="town-founding-dialog">
+            <h2 id="town-dialog-title">Found Town</h2>
+            <p class="tool-note">The church and all currently qualifying unassigned residences will form this town.</p>
+            <label>
+              Town name
+              <input
+                type="text"
+                data-testid="town-name"
+                [value]="townName"
+                (input)="townName = readInputValue($event); townNameError = null"
+                maxlength="40"
+                autofocus
+              />
+            </label>
+            @if (townNameError) {
+              <p class="placement-message is-error" data-testid="town-name-error" role="alert">{{ townNameError }}</p>
+            }
+            <div class="dialog-actions">
+              <button type="button" data-testid="confirm-found-town" (click)="foundTown()">Found Town</button>
+              <button class="secondary-action" type="button" (click)="closeFoundTownDialog()">Cancel</button>
+            </div>
+          </section>
+        }
         @if (roadStates.length > 0) {
           <section class="production-card" data-testid="road-network-summary">
             <h3>Road network</h3>
@@ -767,7 +846,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   saveError: string | null = null;
   saveMessage = 'Autosave is preparing…';
   selectedCell: CellCoordinate | null = null;
-  activeTool: 'select' | 'mine' | 'warehouse' | 'road' = 'select';
+  activeTool: 'select' | 'mine' | 'warehouse' | 'church' | 'residential' | 'road' = 'select';
   placementPreview: PlacementValidationResult | null = null;
   roadPlacementPreview: RoadPlacementValidationResult | null = null;
   placementMessage: string | null = null;
@@ -776,6 +855,9 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   mineralDepositSelection = '';
   showSaveDialog = false;
   manualSaveName = '';
+  showTownFoundingDialog = false;
+  townName = '';
+  townNameError: string | null = null;
   isSaving = false;
   isLeaving = false;
   readonly simulationSpeeds = SIMULATION_SPEEDS;
@@ -794,6 +876,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       ...this.world,
       gameplay: {
         ...this.world.gameplay,
+        towns: this.world.gameplay.towns ?? [],
         clearedCellIndices: this.getClearedCellIndices(
           this.world.gameplay.placedBuildings,
           this.world.gameplay.roads,
@@ -932,6 +1015,14 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.activateBuildingTool('warehouse');
   }
 
+  activateChurchTool(): void {
+    this.activateBuildingTool('church');
+  }
+
+  activateResidentialTool(): void {
+    this.activateBuildingTool('residential');
+  }
+
   activateRoadTool(): void {
     this.activeTool = 'road';
     this.placementPreview = null;
@@ -945,6 +1036,121 @@ export class WorldSession implements AfterViewInit, OnDestroy {
 
   cancelPlacement(): void {
     this.selectTool();
+  }
+
+  get towns(): readonly TownState[] {
+    return this.world?.gameplay.towns ?? [];
+  }
+
+  get selectedTown(): TownState | null {
+    const building = this.selectedBuilding;
+    if (!building) {
+      return null;
+    }
+    return this.towns.find((town) => town.churchBuildingId === building.id ||
+      town.residentialBuildingIds.includes(building.id)) ?? null;
+  }
+
+  get foundingChurch(): PlacedBuildingState | null {
+    const selected = this.selectedBuilding;
+    if (!selected || !this.world) {
+      return null;
+    }
+    if (selected.definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID &&
+        !this.towns.some((town) => town.churchBuildingId === selected.id)) {
+      return selected;
+    }
+    if (selected.definitionId !== VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID) {
+      return null;
+    }
+    const assignment = evaluateResidentialPlacement(
+      selected,
+      this.world.gameplay.placedBuildings,
+      this.towns,
+      this.constructionDefinitions,
+    );
+    return assignment.targetChurchId
+      ? this.world.gameplay.placedBuildings.find((building) => building.id === assignment.targetChurchId) ?? null
+      : null;
+  }
+
+  get foundationEvaluation() {
+    const church = this.foundingChurch;
+    return church && this.world
+      ? evaluateTownFoundation(
+        church,
+        this.world.gameplay.placedBuildings,
+        this.towns,
+        this.constructionDefinitions,
+      )
+      : null;
+  }
+
+  getTownCapacity(town: TownState) {
+    return getTownCapacity(town);
+  }
+
+  openFoundTownDialog(): void {
+    const evaluation = this.foundationEvaluation;
+    if (!evaluation?.valid) {
+      this.placementMessage = evaluation?.failureCode === 'missing-residence'
+        ? 'Place at least one qualifying residence before founding this town.'
+        : 'This church cannot found a town here.';
+      return;
+    }
+    let suggestedOrdinal = this.towns.length + 1;
+    while (this.towns.some((town) => town.name.trim().toLocaleLowerCase() === `town ${suggestedOrdinal}`.toLocaleLowerCase())) {
+      suggestedOrdinal += 1;
+    }
+    this.townName = `Town ${suggestedOrdinal}`;
+    this.townNameError = null;
+    this.showTownFoundingDialog = true;
+  }
+
+  closeFoundTownDialog(): void {
+    this.showTownFoundingDialog = false;
+    this.townNameError = null;
+  }
+
+  foundTown(): void {
+    if (!this.world) {
+      return;
+    }
+    const church = this.foundingChurch;
+    const evaluation = church
+      ? evaluateTownFoundation(
+        church,
+        this.world.gameplay.placedBuildings,
+        this.towns,
+        this.constructionDefinitions,
+      )
+      : null;
+    if (!church || !evaluation?.valid) {
+      this.townNameError = 'This church no longer has a valid town foundation.';
+      return;
+    }
+    const nameError = validateTownName(this.townName, this.towns);
+    if (nameError) {
+      this.townNameError = nameError;
+      return;
+    }
+    const town = createTownState(
+      getNextTownId(this.towns),
+      this.townName,
+      church.id,
+      evaluation.eligibleResidentialBuildingIds,
+    );
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      this.world.gameplay.production,
+      this.world.gameplay.roads,
+      this.world.gameplay.vehicles,
+      true,
+      [...this.towns, town],
+    );
+    this.showTownFoundingDialog = false;
+    this.townNameError = null;
+    this.placementMessage = `Founded ${town.name} with ${town.residentialBuildingIds.length * 10} population and worker capacity.`;
   }
 
   get selectedBuilding(): PlacedBuildingState | null {
@@ -1027,6 +1233,12 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     if (!selectedBuilding || !this.world) {
       return;
     }
+    if (selectedBuilding.definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID &&
+        this.towns.some((town) => town.churchBuildingId === selectedBuilding.id &&
+          town.residentialBuildingIds.length > 0)) {
+      this.placementMessage = 'A founded town church is protected from demolition.';
+      return;
+    }
     const cancelled = cancelCourierVansForBuilding(
       this.world.gameplay.production,
       this.world.gameplay.vehicles,
@@ -1042,6 +1254,8 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       production,
       this.world.gameplay.roads,
       cancelled.vehicles,
+      true,
+      removeBuildingFromTowns(this.towns, selectedBuilding.id),
     );
     this.placementMessage = `Removed the selected ${getBuildingLabel(selectedBuilding.definitionId)}.`;
     if (this.activeTool !== 'select' && this.selectedCell) {
@@ -1069,6 +1283,12 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.warehouseSelection = this.selectedMineProduction?.assignedWarehouseId ?? '';
     this.warehouseSelectionChanged = false;
     this.gameScene?.setSelectedCell(this.selectedCell);
+    this.gameScene?.setTownVisualState(
+      this.towns,
+      this.world?.gameplay.placedBuildings ?? [],
+      this.constructionDefinitions,
+      this.foundingChurch?.id ?? null,
+    );
   }
 
   private handleCellHover(cell: CellCoordinate): void {
@@ -1163,7 +1383,30 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     } else if (definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID) {
       production = addWarehouseProductionState(production, building.id);
     }
-    this.updatePlacedBuildings([...this.world.gameplay.placedBuildings, building], production);
+    let towns = this.towns;
+    if (definitionId === VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID) {
+      const assignment = evaluateResidentialPlacement(
+        building,
+        [...this.world.gameplay.placedBuildings, building],
+        towns,
+        this.constructionDefinitions,
+      );
+      if (!assignment.valid) {
+        this.placementMessage = `Cannot place ${label}: ${getResidentialPlacementFailureMessage(assignment.failureCode)}`;
+        return;
+      }
+      if (assignment.targetTownId) {
+        towns = addResidenceToTown(towns, assignment.targetTownId, building.id);
+      }
+    }
+    this.updatePlacedBuildings(
+      [...this.world.gameplay.placedBuildings, building],
+      production,
+      this.world.gameplay.roads,
+      this.world.gameplay.vehicles,
+      true,
+      towns,
+    );
     this.dispatchAvailableCourierVans();
     this.selectCell(origin);
     this.placementMessage = `Placed ${label} at ${origin.x}, ${origin.y}.`;
@@ -1216,23 +1459,54 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       origin,
       rotationQuarterTurns: 0,
     });
-    if (!validation.valid || definitionId !== VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID) {
+    if (!validation.valid) {
       return validation;
     }
-    const candidate: PlacedBuildingState = {
-      id: 'placement-preview',
-      definitionId,
-      origin: { x: origin.x, y: origin.y },
-      rotationQuarterTurns: 0,
-    };
-    if (this.findMineBinding(candidate)) {
+    if (definitionId === VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID) {
+      const candidate: PlacedBuildingState = {
+        id: 'placement-preview',
+        definitionId,
+        origin: { x: origin.x, y: origin.y },
+        rotationQuarterTurns: 0,
+      };
+      if (this.findMineBinding(candidate)) {
+        return validation;
+      }
+      return {
+        ...validation,
+        valid: false,
+        failures: [...validation.failures, { code: 'missing-mineral-deposit' }],
+      };
+    }
+    if (definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID) {
       return validation;
     }
-    return {
-      ...validation,
-      valid: false,
-      failures: [...validation.failures, { code: 'missing-mineral-deposit' }],
-    };
+    if (definitionId === VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID) {
+      const candidate: PlacedBuildingState = {
+        id: 'placement-preview',
+        definitionId,
+        origin: { x: origin.x, y: origin.y },
+        rotationQuarterTurns: 0,
+      };
+      const settlementValidation = evaluateResidentialPlacement(
+        candidate,
+        [...this.world.gameplay.placedBuildings, candidate],
+        this.towns,
+        this.constructionDefinitions,
+      );
+      if (!settlementValidation.valid) {
+        return {
+          ...validation,
+          valid: false,
+          failures: [
+            ...validation.failures,
+            { code: settlementValidation.failureCode ?? 'outside-town-influence' },
+          ],
+        };
+      }
+      return validation;
+    }
+    return validation;
   }
 
   private findMineBinding(building: PlacedBuildingState) {
@@ -1251,7 +1525,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     });
   }
 
-  private activateBuildingTool(tool: 'mine' | 'warehouse'): void {
+  private activateBuildingTool(tool: 'mine' | 'warehouse' | 'church' | 'residential'): void {
     this.activeTool = tool;
     this.roadPlacementPreview = null;
     this.gameScene?.setRoadPreview(null);
@@ -1388,6 +1662,12 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     if (this.activeTool === 'warehouse') {
       return VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID;
     }
+    if (this.activeTool === 'church') {
+      return VELUTINOUS_MANUL_CHURCH_DEFINITION_ID;
+    }
+    if (this.activeTool === 'residential') {
+      return VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID;
+    }
     throw new Error('The active tool does not have a building definition.');
   }
 
@@ -1421,6 +1701,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     roads = this.world?.gameplay.roads ?? [],
     vehicles = this.world?.gameplay.vehicles ?? [],
     syncStaticVisuals = true,
+    towns = this.world?.gameplay.towns ?? [],
   ): void {
     if (!this.world) {
       return;
@@ -1429,6 +1710,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       ...this.world,
       gameplay: {
         placedBuildings,
+        towns,
         roads,
         clearedCellIndices: this.getClearedCellIndices(placedBuildings, roads),
         production: reconcileMineralProductionState(
@@ -1462,6 +1744,12 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       this.gameScene?.setRoads(
         this.world?.gameplay.roads ?? [],
         deriveRoadConnectionMasks(this.world?.gameplay.roads ?? []),
+      );
+      this.gameScene?.setTownVisualState(
+        this.world?.gameplay.towns ?? [],
+        this.world?.gameplay.placedBuildings ?? [],
+        this.constructionDefinitions,
+        this.foundingChurch?.id ?? null,
       );
     }
     this.gameScene?.setCourierVans(this.world?.gameplay.vehicles ?? []);
@@ -1782,7 +2070,11 @@ function getBuildingLabel(definitionId: string): string {
     ? 'shaft-house mine'
     : definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID
       ? 'arcaded warehouse'
-      : 'building';
+      : definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID
+        ? 'church'
+        : definitionId === VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID
+          ? 'residence'
+          : 'building';
 }
 
 function getPlacementFailureMessage(validation: PlacementValidationResult): string {
@@ -1805,9 +2097,21 @@ function getPlacementFailureMessage(validation: PlacementValidationResult): stri
       return 'the footprint contains a road';
     case 'missing-mineral-deposit':
       return 'the mine shaft must reach an iron, copper, or stone deposit';
+    case 'outside-town-influence':
+      return 'the residence must be within a church or founded-town influence area';
+    case 'ambiguous-town-influence':
+      return 'the residence overlaps more than one church or town influence area';
     default:
       return 'the selected location is invalid';
   }
+}
+
+function getResidentialPlacementFailureMessage(
+  failureCode: 'outside-town-influence' | 'ambiguous-town-influence' | undefined,
+): string {
+  return failureCode === 'ambiguous-town-influence'
+    ? 'the residence overlaps more than one church or town influence area'
+    : 'the residence must be within a church or founded-town influence area';
 }
 
 function getRoadPlacementFailureMessage(validation: RoadPlacementValidationResult): string {

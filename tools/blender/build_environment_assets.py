@@ -1,8 +1,8 @@
-"""Build Velutinous Manul's original low-poly environment kit.
+"""Build Velutinous Manul's original low-poly environment kit and buildings.
 
-This script intentionally uses only Blender primitives and materials created in
-this file. It is a reproducible source for the first runtime GLB; no external
-asset or texture is imported.
+The nature kit intentionally uses only Blender primitives and materials created
+in this file. Authored building masters are imported from their editable source
+files, flattened into the same reproducible runtime GLB, and never modified.
 """
 
 import argparse
@@ -57,6 +57,29 @@ NATURE_BASE_IDS = (
     "ore_iron",
     "ore_copper",
     "ore_stone",
+)
+
+# The architectural masters are intentionally authored larger for Blender
+# review. Keep their proportions, but calibrate the runtime models to the
+# stylized one-cell-per-world-unit environment and leave room inside each
+# logical construction lot.
+SETTLEMENT_RUNTIME_SCALE = 0.5
+
+AUTHORED_BUILDING_SPECS = (
+    (
+        "art/buildings/church/church.blend",
+        "church_master",
+        "church",
+        ("CHURCH_MODEL", "CHURCH_REPEATED", "CHURCH_ORNAMENT"),
+        SETTLEMENT_RUNTIME_SCALE,
+    ),
+    (
+        "art/buildings/residential_01/residential_01.blend",
+        "residential_01_master",
+        "residential_01",
+        ("RESIDENTIAL_01_ARCHITECTURE", "RESIDENTIAL_01_REPEATED", "RESIDENTIAL_01_TERRACE_DETAILS"),
+        SETTLEMENT_RUNTIME_SCALE,
+    ),
 )
 
 
@@ -870,6 +893,67 @@ def create_lod1(source, name, collection):
     return ground_asset(copy)
 
 
+def import_authored_building(
+    source_path,
+    root_name,
+    asset_name,
+    collection_names,
+    collection,
+    runtime_scale=1.0,
+):
+    """Flatten one editable building master into a runtime mesh.
+
+    The authoring masters contain references, cameras, and many independently
+    editable mesh parts.  Only the mesh descendants of the named master root
+    belong in the runtime environment bundle.
+    """
+    absolute_path = os.path.abspath(source_path)
+    if not os.path.exists(absolute_path):
+        raise RuntimeError(f"Authored building source is missing: {absolute_path}")
+
+    with bpy.data.libraries.load(absolute_path, link=False) as (data_from, data_to):
+        data_to.collections = list(collection_names)
+    imported_collections = [collection for collection in data_to.collections if collection is not None]
+    for imported_collection in imported_collections:
+        bpy.context.scene.collection.children.link(imported_collection)
+    bpy.context.view_layer.update()
+    imported_objects = list({
+        obj.name: obj
+        for imported_collection in imported_collections
+        for obj in imported_collection.all_objects
+    }.values())
+    imported_names = [obj.name for obj in imported_objects]
+    root = next((obj for obj in imported_objects if obj.name == root_name), None)
+    if root is None:
+        raise RuntimeError(f"Authored building root is missing: {root_name}")
+
+    mesh_objects = [obj for obj in root.children_recursive if obj.type == "MESH"]
+    if not mesh_objects:
+        raise RuntimeError(f"Authored building contains no mesh geometry: {root_name}")
+
+    for obj in mesh_objects:
+        world_matrix = obj.matrix_world.copy()
+        obj.parent = None
+        obj.data = obj.data.copy()
+        obj.data.transform(world_matrix)
+        obj.matrix_world = Matrix.Identity(4)
+        for source_collection in list(obj.users_collection):
+            source_collection.objects.unlink(obj)
+        collection.objects.link(obj)
+
+    asset = join_objects(mesh_objects, asset_name)
+    if runtime_scale <= 0.0:
+        raise RuntimeError(f"Authored building runtime scale must be positive: {asset_name}")
+    if abs(runtime_scale - 1.0) > 1e-5:
+        asset.data.transform(Matrix.Diagonal((runtime_scale, runtime_scale, runtime_scale, 1.0)))
+        asset.data.update()
+    for object_name in imported_names:
+        obj = bpy.data.objects.get(object_name)
+        if obj is not None and obj != asset:
+            bpy.data.objects.remove(obj, do_unlink=True)
+    return asset
+
+
 def build_assets():
     environment_assets = [
         tree_spruce("tree_spruce_lod0"),
@@ -922,6 +1006,18 @@ def build_assets():
         collection.objects.unlink(warehouse_lod1)
     lod1_collection.objects.link(warehouse_lod1)
     all_assets.extend((warehouse_lod0, warehouse_lod1))
+
+    for source_path, root_name, asset_base_id, collection_names, runtime_scale in AUTHORED_BUILDING_SPECS:
+        lod0 = import_authored_building(
+            source_path,
+            root_name,
+            f"{asset_base_id}_lod0",
+            collection_names,
+            lod0_collection,
+            runtime_scale,
+        )
+        lod1 = create_lod1(lod0, f"{asset_base_id}_lod1", lod1_collection)
+        all_assets.extend((lod0, lod1))
     return all_assets
 
 
@@ -989,7 +1085,26 @@ def validate_assets(assets):
                 f"Y[{min(ys):.3f}, {max(ys):.3f}] "
                 f"Z[{minimum_z:.3f}, {max(vertex.co.z for vertex in asset.data.vertices):.3f}]"
             )
+        if asset.name.startswith(("church_", "residential_01_")):
+            dimensions = mesh_dimensions(asset)
+            if asset.name.startswith("church_"):
+                expected_maximums = (6.55, 14.20, 13.80)
+            else:
+                expected_maximums = (9.50, 7.30, 8.00)
+            if any(actual > maximum for actual, maximum in zip(dimensions, expected_maximums)):
+                raise RuntimeError(
+                    f"Settlement asset exceeds its calibrated runtime scale: {asset.name} "
+                    f"dimensions {tuple(round(value, 3) for value in dimensions)}"
+                )
+            triangles = sum(max(1, len(polygon.vertices) - 2) for polygon in asset.data.polygons)
+            if triangles <= 0:
+                raise RuntimeError(f"Authored settlement asset has no triangles: {asset.name}")
+            print(
+                f"Validated {asset.name}: {triangles} triangles, "
+                f"dimensions X/Y/Z[{dimensions[0]:.3f}, {dimensions[1]:.3f}, {dimensions[2]:.3f}]"
+            )
     validate_nature_lods(assets)
+    validate_settlement_lods(assets)
 
 
 def validate_nature_lods(assets):
@@ -1012,6 +1127,19 @@ def validate_nature_lods(assets):
                     f"Nature LOD1 silhouette drifted on axis {axis}: {base_id} "
                     f"retains {retention:.3f} of LOD0"
                 )
+
+
+def validate_settlement_lods(assets):
+    by_name = {asset.name: asset for asset in assets}
+    for base_id in ("church", "residential_01"):
+        lod0 = by_name.get(f"{base_id}_lod0")
+        lod1 = by_name.get(f"{base_id}_lod1")
+        if lod0 is None or lod1 is None:
+            raise RuntimeError(f"Settlement asset is missing a required LOD pair: {base_id}")
+        lod0.data.calc_loop_triangles()
+        lod1.data.calc_loop_triangles()
+        if len(lod1.data.loop_triangles) >= len(lod0.data.loop_triangles):
+            raise RuntimeError(f"Settlement LOD1 did not reduce geometry: {base_id}")
 
 
 def mesh_dimensions(asset):

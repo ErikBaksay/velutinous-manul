@@ -9,11 +9,11 @@ Every implementation milestone is small enough to run and manually test. Work pa
 ## Current status
 
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
-- **Current development stage:** Stage 1 — browser and 3D foundation with the first generic mine-to-warehouse gameplay slice implemented; Map Generation v1 Gate 6.3 approved for map creation and preview.
+- **Current development stage:** Stage 1 — browser and 3D foundation with the first generic mine-to-warehouse and church-centered town-building slices implemented; Map Generation v1 Gate 6.3 approved for map creation and preview.
 - **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placement, removal, and save/reload; Milestones 7–8 classical shaft-house asset contract and authored runtime integration; Milestone 9 arcaded warehouse authored asset and construction integration; Milestone 10 generic mineral production and warehouse transfer; Milestone 11 construction-aware natural-item clearing.
-- **Current task:** Manually review the revised Residential Building 01 primary architecture. The proportion blockout was approved on 2026-08-29; the rooftop AC/service box and all window-mounted guards were subsequently removed, while the penthouse terrace railing remains. The source contains 56 upper/penthouse windows, 13 ground openings, detailed frames, wall lights, cladding joints, and the rounded terrace railing. Construction-clearing gameplay review remains open in parallel.
-- **Next planned work:** After explicit primary-architecture approval, add the attached terrace planters and vegetation, tune the final procedural stucco/cladding/glass/metal surfaces, and produce the final Blender exterior-master review.
-- **Deferred systems:** Remaining production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
+- **Current task:** Manually review the first playable church-centered town loop. The current church and Residential Building 01 masters are integrated behind stable runtime IDs; construction, founding, chained growth, capacity, persistence, and protected-church removal are ready for browser review.
+- **Next planned work:** Review the town loop and authored-building presentation, then tune attached terrace planters/vegetation and final procedural residential surfaces as a separate art pass.
+- **Deferred systems:** Remaining production chains, physical trucks beyond courier vans, advanced settlements/services, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until their prerequisites are working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
 
@@ -372,17 +372,26 @@ The separate pipeline and composed-scene alternatives were rejected because the 
 
 ### Milestone 12 — Church-centered settlement foundation
 
-- Add data-driven church and residential building definitions with authored
-  assets that follow the existing environment conventions; exact footprints,
-  proportions, and material details remain subject to visual blockout review.
-- Make the church the universal settlement anchor and expose a deterministic
-  founding area around it.
-- Allow a residential building inside that area to provide the initial
-  settlement population/worker capacity.
-- Add an explicit `Found Town` action that creates a named town state only when
-  the church and residential prerequisite are satisfied.
-- Show the church-centered settlement clearly in the world with a center,
-  founding-area feedback, town label, and initial population capacity.
+- Add data-driven church (`7×14`) and Residential Building 01 (`10×8`)
+  definitions with the current authored masters integrated as `church` and
+  `residential_01` runtime asset families, each with LOD0/LOD1.
+- Make the church the universal settlement anchor and expose an inclusive
+  8-cell edge-to-edge Chebyshev founding area.
+- Allow a residence inside exactly one unfounded church or founded-town network;
+  reject ambiguous placement and allow multiple independent towns.
+- Add an explicit `Found Town` action with trimmed, case-insensitive-unique names
+  and a suggested `Town N` default. Founding claims all currently qualifying
+  unassigned residences around the church.
+- Extend founded-town influence through connected residential buildings. Derive
+  `10` population capacity and `10` worker capacity per residence.
+- Show the church-centered settlement clearly in the world with a center marker,
+  label, town summary, founding-area feedback, and capacity.
+- Protect a founded church from demolition while it has related residences.
+  Residence removal updates membership and capacity; an empty town remains in
+  the save for rebuilding, and its church may then be removed with the empty
+  town record cleaned up.
+- Persist towns in schema v7 and migrate schema v6 and older saves with no town
+  state. Keep citizens, services, roads, and economy requirements deferred.
 - Preserve the existing separation between construction, simulation, and
   rendering; do not add individual citizens, full services, or a complete
   settlement economy in this milestone.
@@ -390,9 +399,22 @@ The separate pipeline and composed-scene alternatives were rejected because the 
   save/reload, removal of prerequisite buildings, and preservation of the
   existing mine, warehouse, and courier-van flow.
 
-**Pre-model design decision — 2026-08-29:** Every settlement is church-centered. The first playable founding rule is one church plus one residential building within the church's founding area, followed by an explicit town-founding action. The church is an anchor and identity building, not a production chain. Exact building footprints and the church/plaza visual composition will be settled during the asset blockout review.
+**Implementation status:** Implemented pending manual gameplay and asset/render
+approval. The browser has Church and Residence tools, an 8-cell edge-to-edge
+Chebyshev influence evaluator, ambiguous-placement rejection, named town
+founding, connected residential growth, derived capacity, town markers/labels,
+and churches protected while their towns have residences. `TownState[]` is
+persisted in save schema v7;
+schema v6 and older saves load with no towns. Focused unit coverage includes
+definitions, settlement rules, component actions, save migration/validation,
+and runtime asset fallback/LOD contracts. The current export contains
+`church_lod0/1` and `residential_01_lod0/1` behind stable IDs, with a uniform
+`0.5×` runtime calibration for both settlement families; the calibrated
+construction footprints are `7×14` for the church and `10×8` for residences.
 
-**Church asset primary architecture — 2026-08-29:** The proportional blockout and roof-gap correction are approved. The Blender-first exterior master retains its nominal `12.8 × 28.0 × 27.0 m` envelope, local `-Y` entrance, `Z=0` ground contact, mirrored left elevation, and conservative centered rear annex. The selected hybrid method reserves geometry for architectural relief and uses procedural materials only for subtle finish variation. The current approval gate adds the reference-matched four-window side rhythm, basement vents, bay pilasters, Ionic portico bases/capitals/volutes, layered entablature, paneled entry and upper glazing, pediment oculus, clock face and hands, belfry and lantern apertures, opaque louvers, and inferred annex openings. The tower was moved `0.5 m` toward the facade within the approved envelope so its clock stage remains visible above the front gable as in the references. Stone courses, roof seams, spire ribs, dentils, keystones, fluting, and the finest ornament remain for the final-detail gate; runtime export and game integration remain outside the modeling pass.
+**Pre-model design decision — 2026-08-29:** Every settlement is church-centered. The first playable founding rule is one church plus one residential building within the church's founding area, followed by an explicit town-founding action. The church is an anchor and identity building, not a production chain.
+
+**Church asset primary architecture — 2026-08-29:** The proportional blockout and roof-gap correction are approved. The Blender-first exterior master retains its nominal `12.8 × 28.0 × 27.0 m` envelope, local `-Y` entrance, `Z=0` ground contact, mirrored left elevation, and conservative centered rear annex. The selected hybrid method reserves geometry for architectural relief and uses procedural materials only for subtle finish variation. The current approval gate adds the reference-matched four-window side rhythm, basement vents, bay pilasters, Ionic portico bases/capitals/volutes, layered entablature, paneled entry and upper glazing, pediment oculus, clock face and hands, belfry and lantern apertures, opaque louvers, and inferred annex openings. The tower was moved `0.5 m` toward the facade within the approved envelope so its clock stage remains visible above the front gable as in the references. Stone courses, roof seams, spire ribs, dentils, keystones, fluting, and the finest ornament remain for the final-detail gate. The current master is exported behind stable runtime IDs `church_lod0/1`; game integration uses the calibrated `7×14` grid footprint.
 
 ## Completed first implementation definition
 

@@ -3,6 +3,7 @@ import {
   createSaveGame,
   createSaveSlotMetadata,
   createWorldSession,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V6,
   SAVE_GAME_SCHEMA_VERSION,
 } from './save-contract';
 import {
@@ -114,6 +115,39 @@ describe('IndexedDbSaveRepository', () => {
 
     expect(loaded?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
     expect(loaded?.world.gameplay.roads).toEqual([]);
+    expect(metadata[0]?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    await deleteDatabase(databaseName);
+  });
+
+  it('accepts schema-six metadata while upgrading it to the current schema', async () => {
+    const databaseName = `${SAVE_DATABASE_NAME}-metadata-v6-${crypto.randomUUID()}`;
+    const repository = new IndexedDbSaveRepository(databaseName);
+    const save = createSaveGame(
+      'schema-six-metadata-save',
+      createWorldSession(
+        {
+          sessionId: 'schema-six-metadata-session',
+          mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+          mapSummary: createMapSummary(),
+          mapData: createMapData(),
+        },
+        1_753_000_000_203,
+      ),
+      'Schema Six Metadata World',
+      'manual',
+    );
+    await repository.put(save);
+
+    const legacyMetadata = createSaveSlotMetadata(save) as unknown as Record<string, any>;
+    legacyMetadata['schemaVersion'] = LEGACY_SAVE_GAME_SCHEMA_VERSION_V6;
+    await overwriteRecords(
+      databaseName,
+      legacyMetadata,
+      structuredClone(save) as unknown as Record<string, any>,
+    );
+
+    const metadata = await repository.listMetadata();
+
     expect(metadata[0]?.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
     await deleteDatabase(databaseName);
   });

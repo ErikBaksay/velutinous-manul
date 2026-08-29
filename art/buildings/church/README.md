@@ -52,5 +52,15 @@ CHURCH_RENDER_ONLY=front blender --background \
 ```
 
 After the final modeling handoff, edit `church.blend` directly.  Do not rerun
-the bootstrap over manual changes.  Runtime GLB export, LODs, collision, plaza,
-and game registration are separate future work.
+the bootstrap over manual changes.  The current runtime export uses stable IDs
+`church_lod0` and `church_lod1`; LOD0 is 16,172 triangles and LOD1 is 8,894
+triangles. The gameplay footprint is a separate strict-land `7×14` cell
+definition, and grid occupancy supplies collision for this first settlement
+slice. The shared environment export applies a uniform `0.5×` runtime scale to
+this architectural master, producing roughly `6.4×14.0×13.56` world units
+(X×Z footprint and Y height). Re-export the shared environment bundle after
+approved art edits:
+
+```bash
+blender --background --python tools/blender/build_environment_assets.py
+```

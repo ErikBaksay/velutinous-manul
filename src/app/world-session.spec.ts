@@ -1,11 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { createCellOccupancy, type BuildingDefinition } from './construction';
+import {
+  createCellOccupancy,
+  type BuildingDefinition,
+} from './construction';
 import type {
   CourierVanState,
   PlacedBuildingState,
   WorldSession as WorldSessionData,
 } from './save/save-contract';
+import { createEmptyMineralProductionState } from './save/save-contract';
 import { SavePersistenceService } from './save/save-persistence';
 import { WorldSessionRuntime } from './session-runtime';
 import {
@@ -144,7 +148,92 @@ describe('WorldSession', () => {
 
     const labels = [...fixture.nativeElement.querySelectorAll('.tool-palette button')]
       .map((button: Element) => button.textContent?.trim());
-    expect(labels).toEqual(['Select', 'Mine', 'Warehouse', 'Road']);
+    expect(labels).toEqual(['Select', 'Mine', 'Warehouse', 'Church', 'Residence', 'Road']);
+    fixture.destroy();
+  });
+
+  it('opens the naming form, founds a town, and shows its derived capacity', () => {
+    const fixture = TestBed.createComponent(WorldSession);
+    const component = fixture.componentInstance;
+    const world = createTownWorldStub();
+    component.world = world;
+    const internals = component as unknown as {
+      occupancy: ReturnType<typeof createCellOccupancy>['occupancy'];
+      constructionDefinitions: ReadonlyMap<string, BuildingDefinition>;
+      selectCell(cell: { x: number; y: number }): void;
+    };
+    internals.occupancy = createCellOccupancy(
+      { width: 64, height: 64 },
+      world.gameplay.placedBuildings,
+      internals.constructionDefinitions,
+    ).occupancy;
+    internals.selectCell({ x: 0, y: 0 });
+    fixture.detectChanges();
+
+    component.openFoundTownDialog();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-testid="town-name"]')?.value).toBe('Town 1');
+
+    component.townName = '  Harbor  ';
+    component.foundTown();
+    fixture.detectChanges();
+
+    expect(component.world?.gameplay.towns).toEqual([{
+      id: 'town-1',
+      name: 'Harbor',
+      churchBuildingId: 'church-1',
+      residentialBuildingIds: ['residence-1'],
+    }]);
+    expect(fixture.nativeElement.querySelector('[data-testid="selected-town-summary"]')?.textContent)
+      .toContain('Population capacity: 10');
+    expect(fixture.nativeElement.querySelector('[data-testid="town-worker-capacity"]')?.textContent)
+      .toContain('10');
+    fixture.destroy();
+  });
+
+  it('protects a founded town church while residences remain, then allows its removal when empty', () => {
+    const fixture = TestBed.createComponent(WorldSession);
+    const component = fixture.componentInstance;
+    const world = createTownWorldStub();
+    component.world = {
+      ...world,
+      gameplay: {
+        ...world.gameplay,
+        towns: [{
+          id: 'town-1',
+          name: 'Harbor',
+          churchBuildingId: 'church-1',
+          residentialBuildingIds: ['residence-1'],
+        }],
+      },
+    };
+    const internals = component as unknown as {
+      occupancy: ReturnType<typeof createCellOccupancy>['occupancy'];
+      constructionDefinitions: ReadonlyMap<string, BuildingDefinition>;
+      selectCell(cell: { x: number; y: number }): void;
+    };
+    internals.occupancy = createCellOccupancy(
+      { width: 64, height: 64 },
+      world.gameplay.placedBuildings,
+      internals.constructionDefinitions,
+    ).occupancy;
+    internals.selectCell({ x: 0, y: 0 });
+    component.removeSelectedBuilding();
+
+    expect(component.world?.gameplay.placedBuildings).toHaveLength(2);
+    expect(component.world?.gameplay.towns[0]?.name).toBe('Harbor');
+    expect(component.placementMessage).toContain('protected from demolition');
+
+    internals.selectCell({ x: 14, y: 3 });
+    component.removeSelectedBuilding();
+    expect(component.world?.gameplay.placedBuildings).toHaveLength(1);
+    expect(component.world?.gameplay.towns[0]?.residentialBuildingIds).toEqual([]);
+
+    internals.selectCell({ x: 0, y: 0 });
+    component.removeSelectedBuilding();
+    expect(component.world?.gameplay.placedBuildings).toHaveLength(0);
+    expect(component.world?.gameplay.towns).toEqual([]);
+    expect(component.placementMessage).toContain('Removed the selected church');
     fixture.destroy();
   });
 
@@ -358,6 +447,59 @@ function createWorldStub(): WorldSessionData {
       },
     },
     gameplay: { placedBuildings: [] },
+  } as unknown as WorldSessionData;
+}
+
+function createTownWorldStub(): WorldSessionData {
+  const mapCellCount = 64 * 64;
+  const buildings: PlacedBuildingState[] = [
+    {
+      id: 'church-1',
+      definitionId: 'velutinous-manul-church',
+      origin: { x: 0, y: 0 },
+      rotationQuarterTurns: 0,
+    },
+    {
+      id: 'residence-1',
+      definitionId: 'velutinous-manul-residential-01',
+      origin: { x: 14, y: 3 },
+      rotationQuarterTurns: 0,
+    },
+  ];
+  const resourceIntensity = {
+    'iron-ore': new Uint8Array(mapCellCount),
+    'copper-ore': new Uint8Array(mapCellCount),
+    stone: new Uint8Array(mapCellCount),
+  };
+  return {
+    sessionId: 'town-world-test',
+    createdAt: 1,
+    updatedAt: 1,
+    map: {
+      configuration: { seed: 'TEST-SEED', width: 64, height: 64 },
+      generationSummary: { mapIdentity: 'town-world-test', startingCell: 0 },
+      authoritativeData: {
+        heightSamples: new Uint16Array(65 * 65),
+        moisture: new Uint8Array(mapCellCount),
+        temperature: new Uint8Array(mapCellCount),
+        biome: new Uint8Array(mapCellCount),
+        waterKind: new Uint8Array(mapCellCount),
+        flags: new Uint8Array(mapCellCount),
+        landmassId: new Uint16Array(mapCellCount),
+        resourceProvinceId: new Uint16Array(mapCellCount),
+        resourceMask: new Uint8Array(mapCellCount),
+        resourceIntensity,
+        deposits: [],
+      },
+    },
+    gameplay: {
+      placedBuildings: buildings,
+      towns: [],
+      roads: [],
+      clearedCellIndices: [],
+      production: createEmptyMineralProductionState(),
+      vehicles: [],
+    },
   } as unknown as WorldSessionData;
 }
 

@@ -82,3 +82,17 @@ roads, inventories, and physical cargo remain separate gameplay work.
 LOD0 is 7,699 triangles and LOD1 is 5,402 triangles. LOD1 is authored
 separately so the canopy, loading rhythm, end pediment, roof field, and vents
 retain their silhouettes.
+
+## Settlement runtime calibration
+
+The church and Residential Building 01 masters are intentionally authored at
+architectural metric scale for Blender review. During the shared environment
+export, both settlement asset families receive the same uniform `0.5×` runtime
+scale before LOD1 is generated. This keeps their proportions intact while
+matching the existing low-poly environment: the church exports at roughly
+`6.4×14.0×13.56` world units and Residential Building 01 at roughly
+`9.27×7.02×7.86` world units (X×Z footprint and Y height). The logical
+construction footprints are `7×14` and `10×8` cells, matching the calibrated
+visual bounds so the occupancy mask does not extend beyond the model's lot.
+Stable runtime IDs remain `church_lod0/1` and
+`residential_01_lod0/1`.

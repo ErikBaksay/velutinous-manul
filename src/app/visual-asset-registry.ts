@@ -31,6 +31,8 @@ const ASSET_FAMILIES: Readonly<Record<string, VisualAssetFamily>> = Object.freez
   ore_stone: 'deposit',
   mine_shaft_house: 'building',
   warehouse: 'building',
+  church: 'building',
+  residential_01: 'building',
 });
 
 const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
@@ -51,6 +53,8 @@ const MATERIAL_COLORS: Readonly<Record<string, number>> = Object.freeze({
   ore_stone_lod0: 0xb2afa0,
   mine_shaft_house_lod0: 0x928b7b,
   warehouse_lod0: 0x8b8477,
+  church_lod0: 0x8c8171,
+  residential_01_lod0: 0xc0b7a9,
 });
 
 const DEFAULT_ENVIRONMENT_MANIFEST_PATH = 'assets/environment/manifest.json';
@@ -228,6 +232,8 @@ export class VisualAssetRegistry {
       ['ore_copper_lod0', 'deposit', createOreGeometry(0x4e9b82)],
       ['ore_stone_lod0', 'deposit', createOreGeometry(0xb2afa0)],
       ['warehouse_lod0', 'building', new THREE.BoxGeometry(7.8, 3.2, 3.8)],
+      ['church_lod0', 'building', new THREE.BoxGeometry(6.4, 13.56, 14.0)],
+      ['residential_01_lod0', 'building', new THREE.BoxGeometry(9.27, 7.86, 7.02)],
     ];
     for (const [id, family, geometry] of specs) {
       const preparedGeometry = prepareAssetGeometry(geometry);

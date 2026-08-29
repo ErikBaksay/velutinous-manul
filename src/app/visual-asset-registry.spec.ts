@@ -107,6 +107,22 @@ describe('visual asset registry', () => {
       expect(Array.isArray(warehouse.material) ? warehouse.material.length : 0).toBeGreaterThan(1);
     }
 
+    for (const [id, expectedWidth, expectedDepth] of [
+      ['church_lod0', 6.4, 14],
+      ['residential_01_lod0', 9.27, 7.02],
+    ] as const) {
+      const lod0 = registry.get(id);
+      const lod1 = registry.getLodAsset(id, 1);
+      lod0.geometry.computeBoundingBox();
+      const size = lod0.geometry.boundingBox?.getSize(new THREE.Vector3());
+      expect(size?.x).toBeCloseTo(expectedWidth, 1);
+      expect(size?.z).toBeCloseTo(expectedDepth, 1);
+      expect(lod1.lod).toBe(1);
+      expect(lod1.geometry.getAttribute('position').count).toBeLessThan(
+        lod0.geometry.getAttribute('position').count,
+      );
+    }
+
     registry.destroy();
   });
 });

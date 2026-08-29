@@ -12,7 +12,8 @@ export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V2 = 2 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 = 3 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 = 4 as const;
 export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 = 5 as const;
-export const SAVE_GAME_SCHEMA_VERSION = 6 as const;
+export const LEGACY_SAVE_GAME_SCHEMA_VERSION_V6 = 6 as const;
+export const SAVE_GAME_SCHEMA_VERSION = 7 as const;
 export const COURIER_VAN_CAPACITY = 10 as const;
 export const MAX_MINERAL_OUTPUT_BUFFER = 10_000 as const;
 export const AUTOSAVE_ID = 'autosave' as const;
@@ -36,6 +37,13 @@ export interface PlacedBuildingState {
   readonly definitionId: string;
   readonly origin: GridOrigin;
   readonly rotationQuarterTurns: QuarterTurn;
+}
+
+export interface TownState {
+  readonly id: string;
+  readonly name: string;
+  readonly churchBuildingId: string;
+  readonly residentialBuildingIds: readonly string[];
 }
 
 export type TransferStatus = 'pending' | 'delivered' | 'cancelled';
@@ -97,6 +105,7 @@ export interface MineralProductionState {
 
 export interface GameplayState {
   readonly placedBuildings: readonly PlacedBuildingState[];
+  readonly towns: readonly TownState[];
   readonly roads: readonly RoadState[];
   readonly clearedCellIndices: readonly number[];
   readonly production: MineralProductionState;
@@ -169,6 +178,7 @@ export function createWorldSession(
     },
     gameplay: {
       placedBuildings: [],
+      towns: [],
       roads: [],
       clearedCellIndices: [],
       production: createEmptyMineralProductionState(),
@@ -229,6 +239,10 @@ export function createUpdatedWorldSession(
       placedBuildings: world.gameplay.placedBuildings.map((building) => ({
         ...building,
         origin: { ...building.origin },
+      })),
+      towns: (world.gameplay.towns ?? []).map((town) => ({
+        ...town,
+        residentialBuildingIds: [...town.residentialBuildingIds],
       })),
       roads: world.gameplay.roads.map((road) => ({
         cell: { ...road.cell },

@@ -2,6 +2,8 @@ import {
   BuildingDefinition,
   createBuildingDefinitionRegistry,
 } from './building-definitions';
+import { VELUTINOUS_MANUL_CHURCH_DEFINITION } from './church';
+import { VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION } from './residential';
 import { VELUTINOUS_MANUL_WAREHOUSE_DEFINITION } from './warehouse';
 
 export const VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID =
@@ -28,5 +30,7 @@ export function createVelutinousManulConstructionDefinitionRegistry(): ReadonlyM
   return createBuildingDefinitionRegistry([
     VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION,
     VELUTINOUS_MANUL_WAREHOUSE_DEFINITION,
+    VELUTINOUS_MANUL_CHURCH_DEFINITION,
+    VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION,
   ]);
 }

@@ -2,6 +2,8 @@
   "runtimeAsset": true,
   "assetPath": "assets/environment/environment.glb",
   "assetIds": [
+    "church_lod0",
+    "church_lod1",
     "driftwood_lod0",
     "driftwood_lod1",
     "grass_clump_lod0",
@@ -16,6 +18,8 @@
     "ore_stone_lod1",
     "reed_cluster_lod0",
     "reed_cluster_lod1",
+    "residential_01_lod0",
+    "residential_01_lod1",
     "rock_boulder_lod0",
     "rock_boulder_lod1",
     "rock_outcrop_lod0",

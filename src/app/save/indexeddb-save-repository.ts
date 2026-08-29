@@ -5,6 +5,7 @@ import {
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V3,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V6,
   SaveGame,
   SaveSlotMetadata,
   SAVE_GAME_SCHEMA_VERSION,
@@ -175,6 +176,7 @@ function validateMetadata(value: unknown): SaveSlotMetadata {
        raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V3 &&
        raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V4 &&
        raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V5 &&
+       raw['schemaVersion'] !== LEGACY_SAVE_GAME_SCHEMA_VERSION_V6 &&
        raw['schemaVersion'] !== SAVE_GAME_SCHEMA_VERSION) ||
       raw['slotKind'] !== 'manual' && raw['slotKind'] !== 'autosave') {
     throw new SaveValidationError('The stored save metadata uses an unsupported format.');

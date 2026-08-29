@@ -71,5 +71,14 @@ review renders were therefore verified with
 Eevee use in Blender.  After the first manual edit, open and save the `.blend`
 directly and run only the review renderer.
 
-Runtime GLB export, LODs, collision, footprint selection, and game registration
-are deliberately deferred until the exterior master is visually approved.
+The current runtime export uses stable IDs `residential_01_lod0` and
+`residential_01_lod1`; LOD0 is 11,996 triangles and LOD1 is 6,596 triangles.
+The gameplay footprint is a separate strict-land `10×8` cell definition, and
+grid occupancy supplies collision for this first settlement slice. The shared
+environment export applies a uniform `0.5×` runtime scale to this architectural
+master, producing roughly `9.27×7.02×7.86` world units (X×Z footprint and Y
+height). Re-export the shared environment bundle after approved art edits:
+
+```bash
+blender --background --python tools/blender/build_environment_assets.py
+```

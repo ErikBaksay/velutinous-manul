@@ -26,12 +26,14 @@ import {
   getRoadCellKey,
   getRotatedFootprintSize,
   getConstructionTerrainSample,
+  VELUTINOUS_MANUL_CHURCH_DEFINITION_ID,
   terrainHitPointToCellCoordinate,
   VELUTINOUS_MANUL_PLACEHOLDER_MINE_DEFINITION_ID,
+  VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID,
   VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID,
 } from './construction';
 import type { PlacedBuildingState, RoadState } from './save/save-contract';
-import type { CourierVanState } from './save/save-contract';
+import type { CourierVanState, TownState } from './save/save-contract';
 import { VehicleAssetRegistry } from './vehicle-asset-registry';
 import type { RoadConnectionMask } from './construction/road-network';
 import {
@@ -49,6 +51,7 @@ import {
   getRightHandLanePose,
 } from './vehicle-lane-geometry';
 import type { VehicleLanePoint } from './vehicle-lane-geometry';
+import { getBuildingFootprintCells, TOWN_FOUNDING_RADIUS_CELLS } from './settlement';
 
 export interface GameSceneCellInteractionCallbacks {
   readonly onCellHover: (cell: CellCoordinate) => void;
@@ -80,6 +83,8 @@ const MAP_BACKDROP_SIZE = Math.max(MAP_WIDTH, MAP_HEIGHT) * 3;
 const MAP_DIMENSIONS = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
 const MINE_ASSET_ID = 'mine_shaft_house_lod0';
 const WAREHOUSE_ASSET_ID = 'warehouse_lod0';
+const CHURCH_ASSET_ID = 'church_lod0';
+const RESIDENTIAL_01_ASSET_ID = 'residential_01_lod0';
 const BUILDING_LOD_VISIBLE_HEIGHT = 58;
 const COURIER_VAN_VISUAL_INTERPOLATION_SECONDS = 0.1;
 
@@ -104,6 +109,7 @@ export class GameScene {
   private readonly placementPreviewVisual = createPlacementPreviewVisual();
   private readonly placementPreviewModelVisual = new THREE.Group();
   private readonly placedBuildingVisuals = new THREE.Group();
+  private readonly townVisuals = new THREE.Group();
   private readonly roadVisuals = new THREE.Group();
   private readonly roadPreviewVisual = new THREE.Group();
   private readonly vehicleVisuals = new THREE.Group();
@@ -171,6 +177,7 @@ export class GameScene {
     this.scene.fog = new THREE.Fog(0x76918e, CAMERA_FOG_NEAR, CAMERA_FAR_PLANE);
     this.mapBackdrop = createMapBackdrop();
     this.placedBuildingVisuals.name = 'construction-placed-buildings';
+    this.townVisuals.name = 'settlement-town-visuals';
     this.roadVisuals.name = 'construction-placed-roads';
     this.roadPreviewVisual.name = 'construction-road-preview';
     this.vehicleVisuals.name = 'transport-courier-vans';
@@ -183,6 +190,7 @@ export class GameScene {
     this.scene.add(this.roadVisuals);
     this.scene.add(this.roadPreviewVisual);
     this.scene.add(this.placedBuildingVisuals);
+    this.scene.add(this.townVisuals);
     this.scene.add(this.vehicleVisuals);
     this.canvas.addEventListener('pointermove', this.onCanvasPointerMove);
     this.canvas.addEventListener('click', this.onCanvasClick);
@@ -210,6 +218,7 @@ export class GameScene {
     this.chunkStreamingManager.destroy();
     this.visualAssetRegistry.destroy();
     this.clearCourierVanVisuals();
+    this.clearTownVisuals();
     this.vehicleAssetRegistry.destroy();
     this.chunkDebugVisualizer?.dispose();
     this.resizeObserver.disconnect();
@@ -244,6 +253,7 @@ export class GameScene {
     this.courierVanStates.clear();
     this.courierVanVisualTransitions.clear();
     this.clearPlacedBuildingVisuals();
+    this.clearTownVisuals();
     this.placedBuildingOrigins.clear();
     await this.visualAssetRegistry.load();
     await this.vehicleAssetRegistry.load();
@@ -321,6 +331,11 @@ export class GameScene {
     }
 
     const color = preview.valid ? 0x72d69a : 0xf07878;
+    while (this.placementPreviewVisual.children.length < preview.occupiedCells.length) {
+      const cellVisual = createCellVisual();
+      cellVisual.visible = false;
+      this.placementPreviewVisual.add(cellVisual);
+    }
     for (let index = 0; index < this.placementPreviewVisual.children.length; index += 1) {
       const cellVisual = this.placementPreviewVisual.children[index];
       if (!(cellVisual instanceof THREE.Group)) {
@@ -606,6 +621,69 @@ export class GameScene {
     }
   }
 
+  setTownVisualState(
+    towns: readonly TownState[],
+    buildings: readonly PlacedBuildingState[],
+    definitions: ReadonlyMap<string, BuildingDefinition>,
+    foundingChurchId: string | null = null,
+  ): void {
+    this.clearTownVisuals();
+    if (!this.mapData) {
+      return;
+    }
+
+    const buildingsById = new Map(buildings.map((building) => [building.id, building]));
+    for (const town of [...towns].sort((left, right) => left.id.localeCompare(right.id))) {
+      const church = buildingsById.get(town.churchBuildingId);
+      if (!church) {
+        continue;
+      }
+      const townBuildings = [church, ...town.residentialBuildingIds
+        .map((id) => buildingsById.get(id))
+        .filter((building): building is PlacedBuildingState => building !== undefined)];
+      this.townVisuals.add(createTownInfluenceVisual(
+        this.mapData,
+        townBuildings,
+        definitions,
+        0x94ddb0,
+      ));
+      const markerPosition = getBuildingWorldCenter(this.mapData, church, definitions);
+      if (markerPosition) {
+        this.townVisuals.add(createTownMarkerVisual(
+          markerPosition,
+          town.name,
+          town.residentialBuildingIds.length * 10,
+          town.residentialBuildingIds.length * 10,
+          0x94ddb0,
+          `town-${town.id}`,
+        ));
+      }
+    }
+
+    if (foundingChurchId) {
+      const church = buildingsById.get(foundingChurchId);
+      if (church && !towns.some((town) => town.churchBuildingId === church.id)) {
+        this.townVisuals.add(createTownInfluenceVisual(
+          this.mapData,
+          [church],
+          definitions,
+          0xf0c08c,
+        ));
+        const markerPosition = getBuildingWorldCenter(this.mapData, church, definitions);
+        if (markerPosition) {
+          this.townVisuals.add(createTownMarkerVisual(
+            markerPosition,
+            'Founding area',
+            null,
+            null,
+            0xf0c08c,
+            'town-founding-preview',
+          ));
+        }
+      }
+    }
+  }
+
   private getTerrainCellFromPointer(clientX: number, clientY: number): CellCoordinate | null {
     const bounds = this.canvas.getBoundingClientRect();
     const normalized = clientPointToNormalizedDeviceCoordinate(clientX, clientY, bounds);
@@ -647,6 +725,10 @@ export class GameScene {
 
   private clearPlacedBuildingVisuals(): void {
     disposeObjectChildren(this.placedBuildingVisuals);
+  }
+
+  private clearTownVisuals(): void {
+    disposeObjectChildren(this.townVisuals);
   }
 
   private clearCourierVanVisuals(): void {
@@ -1034,6 +1116,157 @@ function createCellVisual(): THREE.Group {
   return group;
 }
 
+function createTownInfluenceVisual(
+  mapData: AuthoritativeMapData,
+  buildings: readonly PlacedBuildingState[],
+  definitions: ReadonlyMap<string, BuildingDefinition>,
+  color: number,
+): THREE.LineSegments {
+  const cells = getTownInfluenceCells(buildings, definitions);
+  const positions: number[] = [];
+  for (const key of cells) {
+    const [x, y] = key.split(',').map(Number);
+    const cell = { x, y };
+    const center = cellToWorldCenter(cell, MAP_DIMENSIONS);
+    const elevation = getConstructionTerrainSample(mapData, MAP_DIMENSIONS, cell).elevationWorld + 0.14;
+    const hasCell = (x: number, y: number): boolean => cells.has(`${x},${y}`);
+    if (!hasCell(cell.x - 1, cell.y)) {
+      positions.push(center.x - 0.5, elevation, center.z - 0.5, center.x - 0.5, elevation, center.z + 0.5);
+    }
+    if (!hasCell(cell.x + 1, cell.y)) {
+      positions.push(center.x + 0.5, elevation, center.z - 0.5, center.x + 0.5, elevation, center.z + 0.5);
+    }
+    if (!hasCell(cell.x, cell.y - 1)) {
+      positions.push(center.x - 0.5, elevation, center.z - 0.5, center.x + 0.5, elevation, center.z - 0.5);
+    }
+    if (!hasCell(cell.x, cell.y + 1)) {
+      positions.push(center.x - 0.5, elevation, center.z + 0.5, center.x + 0.5, elevation, center.z + 0.5);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const line = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+  }));
+  line.name = 'settlement-town-influence';
+  line.renderOrder = 7;
+  return line;
+}
+
+function getTownInfluenceCells(
+  buildings: readonly PlacedBuildingState[],
+  definitions: ReadonlyMap<string, BuildingDefinition>,
+): Set<string> {
+  const cells = new Set<string>();
+  for (const building of buildings) {
+    for (const footprintCell of getBuildingFootprintCells(building, definitions)) {
+      for (let y = footprintCell.y - TOWN_FOUNDING_RADIUS_CELLS;
+           y <= footprintCell.y + TOWN_FOUNDING_RADIUS_CELLS;
+           y += 1) {
+        for (let x = footprintCell.x - TOWN_FOUNDING_RADIUS_CELLS;
+             x <= footprintCell.x + TOWN_FOUNDING_RADIUS_CELLS;
+             x += 1) {
+          if (isCellInMap({ x, y })) {
+            cells.add(`${x},${y}`);
+          }
+        }
+      }
+    }
+  }
+  return cells;
+}
+
+function getBuildingWorldCenter(
+  mapData: AuthoritativeMapData,
+  building: PlacedBuildingState,
+  definitions: ReadonlyMap<string, BuildingDefinition>,
+): THREE.Vector3 | null {
+  const cells = getBuildingFootprintCells(building, definitions).filter(isCellInMap);
+  if (cells.length === 0) {
+    return null;
+  }
+  let x = 0;
+  let z = 0;
+  let y = 0;
+  for (const cell of cells) {
+    const center = cellToWorldCenter(cell, MAP_DIMENSIONS);
+    x += center.x;
+    z += center.z;
+    y += getConstructionTerrainSample(mapData, MAP_DIMENSIONS, cell).elevationWorld;
+  }
+  return new THREE.Vector3(x / cells.length, y / cells.length + 0.2, z / cells.length);
+}
+
+function createTownMarkerVisual(
+  position: THREE.Vector3,
+  name: string,
+  population: number | null,
+  workers: number | null,
+  color: number,
+  markerId: string,
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = markerId;
+  group.position.copy(position);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(3.1, 3.45, 32),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 8;
+  group.add(ring);
+
+  const label = population === null || workers === null
+    ? name
+    : `${name}\n${population} pop · ${workers} workers`;
+  const sprite = createTownLabelSprite(label, color);
+  sprite.position.y = 5.2;
+  group.add(sprite);
+  return group;
+}
+
+function createTownLabelSprite(text: string, color: number): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = text.includes('\n') ? 116 : 72;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return new THREE.Sprite();
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = 'rgba(20, 26, 28, 0.84)';
+  context.roundRect(8, 8, canvas.width - 16, canvas.height - 16, 14);
+  context.fill();
+  context.strokeStyle = `#${new THREE.Color(color).getHexString()}`;
+  context.lineWidth = 4;
+  context.stroke();
+  context.fillStyle = '#fff3e4';
+  context.font = '600 32px sans-serif';
+  context.textAlign = 'center';
+  const lines = text.split('\n');
+  lines.forEach((line, index) => context.fillText(line, canvas.width / 2, 46 + index * 36));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  }));
+  sprite.scale.set(9, text.includes('\n') ? 1.65 : 1.05, 1);
+  sprite.renderOrder = 9;
+  return sprite;
+}
+
 function setCellVisualColor(
   group: THREE.Group,
   color: number,
@@ -1062,6 +1295,10 @@ function disposeObjectChildren(group: THREE.Group): void {
         } else {
           object.material.dispose();
         }
+      } else if (object instanceof THREE.Sprite) {
+        const material = object.material;
+        material.map?.dispose();
+        material.dispose();
       }
     });
     child.removeFromParent();
@@ -1125,6 +1362,12 @@ function getBuildingAssetId(definitionId: string): string | null {
   }
   if (definitionId === VELUTINOUS_MANUL_WAREHOUSE_DEFINITION_ID) {
     return WAREHOUSE_ASSET_ID;
+  }
+  if (definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID) {
+    return CHURCH_ASSET_ID;
+  }
+  if (definitionId === VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID) {
+    return RESIDENTIAL_01_ASSET_ID;
   }
   return null;
 }

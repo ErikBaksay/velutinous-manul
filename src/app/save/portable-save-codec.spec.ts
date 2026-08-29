@@ -10,6 +10,7 @@ import {
   createWorldSession,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V4,
   LEGACY_SAVE_GAME_SCHEMA_VERSION_V5,
+  LEGACY_SAVE_GAME_SCHEMA_VERSION_V6,
   MAX_MINERAL_OUTPUT_BUFFER,
   SAVE_GAME_SCHEMA_VERSION,
 } from './save-contract';
@@ -92,6 +93,101 @@ describe('portable save codec', () => {
     expect(parsed.world.gameplay.placedBuildings).toEqual(placedBuildings);
     expect(parsed.world.gameplay.roads).toEqual(roads);
     expect(parsed.world.gameplay.clearedCellIndices).toEqual(clearedCellIndices);
+  });
+
+  it('round-trips a founded town with church and residential membership', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'town-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_112,
+    );
+    const placedBuildings = [
+      {
+        id: 'church-1',
+        definitionId: 'velutinous-manul-church',
+        origin: { x: 0, y: 0 },
+        rotationQuarterTurns: 0 as const,
+      },
+      {
+        id: 'residence-1',
+        definitionId: 'velutinous-manul-residential-01',
+        origin: { x: 1, y: 0 },
+        rotationQuarterTurns: 0 as const,
+      },
+    ];
+    const towns = [{
+      id: 'town-1',
+      name: '  Harbor  ',
+      churchBuildingId: 'church-1',
+      residentialBuildingIds: ['residence-1'],
+    }];
+    const parsed = parsePortableSaveFile(serializeSaveGame(createSaveGame(
+      'town-save',
+      { ...world, gameplay: { ...world.gameplay, placedBuildings, towns } },
+      'Town World',
+      'manual',
+    )));
+
+    expect(parsed.world.gameplay.towns).toEqual([{
+      ...towns[0],
+      name: 'Harbor',
+    }]);
+  });
+
+  it('rejects duplicate town IDs, duplicate names, and invalid building references', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'invalid-town-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_114,
+    );
+    const placedBuildings = [
+      { id: 'church-1', definitionId: 'velutinous-manul-church', origin: { x: 0, y: 0 }, rotationQuarterTurns: 0 as const },
+      { id: 'residence-1', definitionId: 'velutinous-manul-residential-01', origin: { x: 1, y: 0 }, rotationQuarterTurns: 0 as const },
+    ];
+    const base = JSON.parse(serializeSaveGame(createSaveGame(
+      'invalid-town-save',
+      {
+        ...world,
+        gameplay: {
+          ...world.gameplay,
+          placedBuildings,
+          towns: [{ id: 'town-1', name: 'Harbor', churchBuildingId: 'church-1', residentialBuildingIds: ['residence-1'] }],
+        },
+      },
+      'Invalid Town World',
+      'manual',
+    ))) as Record<string, any>;
+
+    const duplicateId = structuredClone(base);
+    duplicateId['world']['gameplay']['towns'].push({
+      id: 'town-1',
+      name: 'Hill',
+      churchBuildingId: 'church-1',
+      residentialBuildingIds: [],
+    });
+    expect(() => parsePortableSaveFile(JSON.stringify(duplicateId))).toThrow(SaveValidationError);
+
+    const duplicateName = structuredClone(base);
+    duplicateName['world']['gameplay']['towns'][0]['name'] = ' harbor ';
+    duplicateName['world']['gameplay']['towns'].push({
+      id: 'town-2',
+      name: 'HARBOR',
+      churchBuildingId: 'church-1',
+      residentialBuildingIds: [],
+    });
+    expect(() => parsePortableSaveFile(JSON.stringify(duplicateName))).toThrow(SaveValidationError);
+
+    const invalidReference = structuredClone(base);
+    invalidReference['world']['gameplay']['towns'][0]['residentialBuildingIds'] = ['missing-residence'];
+    expect(() => parsePortableSaveFile(JSON.stringify(invalidReference))).toThrow(SaveValidationError);
   });
 
   it('round-trips generic mineral production state', () => {
@@ -377,6 +473,31 @@ describe('portable save codec', () => {
     const parsed = parsePortableSaveFile(JSON.stringify(current));
 
     expect(parsed.world.gameplay.clearedCellIndices).toEqual([1]);
+  });
+
+  it('migrates a version-six portable file with no town state', () => {
+    const world = createWorldSession(
+      {
+        sessionId: 'legacy-v6-session',
+        mapConfig: { ...DEFAULT_MAP_CONFIG, width: 2, height: 2 },
+        mapSummary: createMapSummary(),
+        mapData: createMapData(),
+      },
+      1_753_000_000_113,
+    );
+    const current = JSON.parse(serializeSaveGame(createSaveGame(
+      'legacy-v6-save',
+      world,
+      'Legacy v6 World',
+      'manual',
+    ))) as Record<string, any>;
+    current['schemaVersion'] = LEGACY_SAVE_GAME_SCHEMA_VERSION_V6;
+    delete current['world']['gameplay']['towns'];
+
+    const parsed = parsePortableSaveFile(JSON.stringify(current));
+
+    expect(parsed.schemaVersion).toBe(SAVE_GAME_SCHEMA_VERSION);
+    expect(parsed.world.gameplay.towns).toEqual([]);
   });
 
   it('rejects an output buffer that could trigger unbounded vehicle dispatch', () => {
