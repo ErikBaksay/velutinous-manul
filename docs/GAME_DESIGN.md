@@ -172,6 +172,31 @@ Industry should generally feel advanced, clean, and satisfying rather than autom
 
 Settlements are important, but the game remains primarily about industry, logistics, and construction rather than individual citizen simulation.
 
+### Settlement founding direction
+
+Every settlement is church-centered. The church is the settlement's visual,
+spatial, and civic anchor rather than a production building. The initial
+settlement-founding sequence is:
+
+```text
+place a church
+→ place a residential building within the church's founding area
+→ found a town
+```
+
+The church establishes the settlement center and identity. The first
+residential building represents the initial population and worker capacity.
+Founding a town is an explicit player action that turns these buildings into a
+named settlement with a visible center and room to grow. The first version
+should not simulate individual citizens or require a full service economy.
+
+The intended spatial composition is a traditional church and small plaza at
+the center, residential buildings around it, roads connecting the settlement
+to the wider logistics network, and industrial or warehouse buildings kept
+toward the edge where practical. Later settlement growth can add more homes,
+civic buildings, services, and regional-center upgrades while preserving the
+church-centered identity.
+
 Possible evolution:
 
 ```text

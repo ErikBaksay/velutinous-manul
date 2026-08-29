@@ -12,7 +12,7 @@ Every implementation milestone is small enough to run and manually test. Work pa
 - **Current development stage:** Stage 1 — browser and 3D foundation with the first generic mine-to-warehouse gameplay slice implemented; Map Generation v1 Gate 6.3 approved for map creation and preview.
 - **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placement, removal, and save/reload; Milestones 7–8 classical shaft-house asset contract and authored runtime integration; Milestone 9 arcaded warehouse authored asset and construction integration; Milestone 10 generic mineral production and warehouse transfer; Milestone 11 construction-aware natural-item clearing.
 - **Current task:** Manually review construction clearing in the actual world session, including decorative persistence after demolition and temporary mineral-deposit visual hiding.
-- **Next planned work:** Record manual gameplay feedback and continue the next approved construction or transport slice.
+- **Next planned work:** Record manual gameplay feedback, close the construction-clearing review, and prepare the church-centered settlement foundation as the next approved construction/content slice.
 - **Deferred systems:** Remaining production chains, physical trucks, settlements, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until the prerequisite slice is working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -353,12 +353,12 @@ The separate pipeline and composed-scene alternatives were rejected because the 
 
 - Replace the iron-specific extraction model with one typed mineral model for iron ore, copper ore, and stone.
 - Bind the mine’s authored local resource anchor with quarter-turn conversion, one-cell Chebyshev extraction, nearest-deposit selection, and ID tie-breaking.
-- Add schema-v3 production state with deposit bindings, mine buffers and totals, typed warehouse inventories, transfer records, and a manual simulation tick.
+- Add schema-v3 production state with deposit bindings, mine buffers and totals, typed warehouse inventories, transfer records, and an automatic simulation clock.
 - Preserve v1/v2 save compatibility, keep authoritative map deposits immutable, and clean up production state when mines or warehouses are removed.
-- Extend the world session with generic deposit binding information, explicit warehouse assignment, quantity test IDs, warehouse inventory views, and Run Tick controls.
+- Extend the world session with generic deposit binding information, explicit warehouse assignment, quantity test IDs, warehouse inventory views, and simulation pause/speed controls.
 - Verify unit binding/production behavior, portable and IndexedDB migration/validation, application/e2e type checks, production build, and the deterministic browser transfer flow through save/reload.
 
-**Implementation status:** Implemented. The deterministic simulation uses 10 units per mine per tick from unlimited deposit sources, stable mine ordering, immediate full-buffer delivery to the explicitly assigned warehouse, and buffering when unassigned. Unit coverage includes all three mineral kinds, rotations, extraction radius, deterministic ties, continuous production from legacy zero-capacity state, buffering, explicit destinations, cleanup, and persistence/malformed-save cases. The browser scenario uses the deterministic world’s valid mineral deposit and verifies assignment, a tick, typed inventory, manual save, leave, load, and persisted quantity. The production build passes with the existing 11-byte global stylesheet budget warning.
+**Implementation status:** Implemented. The deterministic simulation uses 10 units per mine per tick from unlimited deposit sources, stable mine ordering, immediate full-buffer delivery to the explicitly assigned warehouse, and buffering when unassigned. The world session now advances production automatically once per second at 1×, with 2× and 4× speeds, a shared pause state for production and transport, and session-only controls. Unit coverage includes all three mineral kinds, rotations, extraction radius, deterministic ties, continuous production from legacy zero-capacity state, buffering, explicit destinations, cleanup, and persistence/malformed-save cases. The browser scenario uses the deterministic world’s valid mineral deposit and verifies automatic ticking, assignment, delivery, manual save, leave, load, and persisted quantity. The production build passes with the existing 11-byte global stylesheet budget warning.
 
 ### Milestone 11 — Construction-aware natural-item clearing
 
@@ -369,6 +369,28 @@ The separate pipeline and composed-scene alternatives were rejected because the 
 - Verify construction cell derivation, renderer filtering, streaming refresh, save migration, application tests, production build, and e2e browser coverage.
 
 **Implementation status:** Implemented pending manual visual approval. Focused and full Angular unit suites pass (136 tests), e2e browser coverage passes (18 tests), application/e2e TypeScript checks pass, and the production build succeeds with the existing 11-byte CSS budget warning.
+
+### Milestone 12 — Church-centered settlement foundation
+
+- Add data-driven church and residential building definitions with authored
+  assets that follow the existing environment conventions; exact footprints,
+  proportions, and material details remain subject to visual blockout review.
+- Make the church the universal settlement anchor and expose a deterministic
+  founding area around it.
+- Allow a residential building inside that area to provide the initial
+  settlement population/worker capacity.
+- Add an explicit `Found Town` action that creates a named town state only when
+  the church and residential prerequisite are satisfied.
+- Show the church-centered settlement clearly in the world with a center,
+  founding-area feedback, town label, and initial population capacity.
+- Preserve the existing separation between construction, simulation, and
+  rendering; do not add individual citizens, full services, or a complete
+  settlement economy in this milestone.
+- Verify placement, invalid/valid founding feedback, town creation,
+  save/reload, removal of prerequisite buildings, and preservation of the
+  existing mine, warehouse, and courier-van flow.
+
+**Pre-model design decision — 2026-08-29:** Every settlement is church-centered. The first playable founding rule is one church plus one residential building within the church's founding area, followed by an explicit town-founding action. The church is an anchor and identity building, not a production chain. Exact building footprints and the church/plaza visual composition will be settled during the asset blockout review.
 
 ## Completed first implementation definition
 
@@ -740,3 +762,18 @@ The second revised sunset concept is the approved visual target. It defines the 
 - **Decision:** Keep the existing road geometry, reduce the runtime courier van scale to `0.18`, and derive a right-hand lane path from each saved route using an offset of one quarter of the road surface width.
 - **Rejected alternatives:** Centerline-only placement would not provide directional lane readability; widening the established road footprint would change the existing road visual; a full traffic system with opposing vehicles and collision spacing is outside this focused presentation fix.
 - **Implementation boundary:** Lane offsets and corner joins are render-only. Transport simulation, route snapshots, save schema, road cells, delivery timing, and the authored Blender/GLB vehicle asset remain unchanged.
+
+### 2026-08-29 — Church-centered settlements
+
+- **Decision:** All settlements are centered on a church. The church provides
+  the visual, spatial, and civic anchor; it is not a production building.
+- **Founding sequence:** Place a church, place one residential building within
+  its founding area, then explicitly found a town.
+- **Initial scope:** Represent the first residential building as population and
+  worker capacity without simulating individual citizens or a complete service
+  economy. Towns receive a name, visible center, and room for later growth.
+- **Composition direction:** Church and small plaza in the center, residences
+  around it, roads connecting outward, and industry/logistics toward the edge
+  where practical.
+- **Modeling boundary:** Exact footprints, proportions, materials, and plaza
+  treatment remain open until the church and residential blockouts are reviewed.

@@ -62,6 +62,80 @@ import {
   VEHICLE_SIMULATION_STEP_SECONDS,
 } from './vehicle-transport';
 
+export const SIMULATION_SPEEDS = [1, 2, 4] as const;
+export type SimulationSpeed = (typeof SIMULATION_SPEEDS)[number];
+export const SIMULATION_TICK_INTERVAL_SECONDS = 1;
+export const COURIER_DISPATCH_INTERVAL_TICKS = 10;
+
+export interface SimulationClockState {
+  readonly productionAccumulatorSeconds: number;
+}
+
+export interface SimulationClockStep {
+  readonly elapsedSeconds: number;
+  readonly runProductionTick: boolean;
+}
+
+export interface SimulationClockAdvance {
+  readonly state: SimulationClockState;
+  readonly steps: readonly SimulationClockStep[];
+}
+
+const SIMULATION_CLOCK_EPSILON = 1e-9;
+
+export function advanceSimulationClock(
+  state: SimulationClockState,
+  realElapsedSeconds: number,
+  speed: SimulationSpeed,
+  paused = false,
+): SimulationClockAdvance {
+  if (paused) {
+    return { state, steps: [] };
+  }
+
+  const clampedRealElapsed = Math.min(
+    VEHICLE_SIMULATION_MAX_DELTA_SECONDS,
+    Math.max(0, Number.isFinite(realElapsedSeconds) ? realElapsedSeconds : 0),
+  );
+  if (clampedRealElapsed <= SIMULATION_CLOCK_EPSILON) {
+    return { state, steps: [] };
+  }
+
+  let accumulator = Math.max(0, state.productionAccumulatorSeconds);
+  let remainingSeconds = clampedRealElapsed * speed;
+  const steps: SimulationClockStep[] = [];
+
+  while (remainingSeconds > SIMULATION_CLOCK_EPSILON) {
+    const untilProductionTick = SIMULATION_TICK_INTERVAL_SECONDS - accumulator;
+    if (untilProductionTick <= SIMULATION_CLOCK_EPSILON) {
+      accumulator = Math.max(0, accumulator - SIMULATION_TICK_INTERVAL_SECONDS);
+      steps.push({ elapsedSeconds: 0, runProductionTick: true });
+      continue;
+    }
+
+    const elapsedSeconds = Math.min(
+      remainingSeconds,
+      untilProductionTick,
+      VEHICLE_SIMULATION_MAX_DELTA_SECONDS,
+    );
+    if (elapsedSeconds <= SIMULATION_CLOCK_EPSILON) {
+      break;
+    }
+    remainingSeconds -= elapsedSeconds;
+    accumulator += elapsedSeconds;
+    const runProductionTick = accumulator >= SIMULATION_TICK_INTERVAL_SECONDS - SIMULATION_CLOCK_EPSILON;
+    if (runProductionTick) {
+      accumulator = Math.max(0, accumulator - SIMULATION_TICK_INTERVAL_SECONDS);
+    }
+    steps.push({ elapsedSeconds, runProductionTick });
+  }
+
+  return {
+    state: { productionAccumulatorSeconds: accumulator },
+    steps,
+  };
+}
+
 @Component({
   selector: 'app-world-session',
   standalone: true,
@@ -283,12 +357,42 @@ import {
         }
 
         @if (!showSaveDialog) {
-          <p class="production-tick" data-testid="production-tick">
-            Simulation tick: {{ world?.gameplay?.production?.tick ?? 0 }}
-          </p>
-          <button type="button" data-testid="run-production-tick" (click)="runSimulationTick()" [disabled]="isSaving">
-            Run Tick
-          </button>
+          <section class="production-card simulation-card" data-testid="simulation-controls" aria-labelledby="simulation-title">
+            <div class="simulation-heading">
+              <h3 id="simulation-title">Simulation</h3>
+              <span
+                class="simulation-status"
+                [class.is-paused]="isSimulationPaused"
+                data-testid="simulation-status"
+                role="status"
+              >{{ isSimulationPaused ? 'Paused' : 'Running' }}</span>
+            </div>
+            <p class="production-tick" data-testid="simulation-tick">
+              Simulation tick: {{ world?.gameplay?.production?.tick ?? 0 }}
+            </p>
+            <div class="simulation-controls" role="group" aria-label="Simulation controls">
+              <button
+                type="button"
+                class="simulation-pause"
+                data-testid="simulation-pause"
+                (click)="toggleSimulationPause()"
+                [attr.aria-pressed]="isSimulationPaused"
+              >{{ isSimulationPaused ? 'Resume' : 'Pause' }}</button>
+              @for (speed of simulationSpeeds; track speed) {
+                <button
+                  type="button"
+                  class="simulation-speed"
+                  [class.is-active]="simulationSpeed === speed"
+                  [attr.data-testid]="'simulation-speed-' + speed"
+                  [attr.aria-pressed]="simulationSpeed === speed"
+                  (click)="setSimulationSpeed(speed)"
+                >{{ speed }}×</button>
+              }
+            </div>
+            <p class="simulation-speed-note" data-testid="simulation-speed-label">
+              Speed: {{ simulationSpeed }}×
+            </p>
+          </section>
           <button type="button" (click)="openSaveDialog()">Save World</button>
         }
         <button class="secondary-action" type="button" (click)="leaveWorld()" [disabled]="isLeaving">
@@ -385,6 +489,62 @@ import {
         margin: 10px 0 0;
         color: #b9b0a7;
         font-size: 10px;
+      }
+
+      .simulation-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .simulation-heading h3 {
+        margin: 0;
+      }
+
+      .simulation-status {
+        color: #94ddb0;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .simulation-status.is-paused {
+        color: #e0b487;
+      }
+
+      .simulation-controls {
+        display: grid;
+        grid-template-columns: 1.4fr repeat(3, 1fr);
+        gap: 5px;
+        margin-top: 5px;
+      }
+
+      .simulation-controls button {
+        min-width: 0;
+        padding: 7px 5px;
+        color: #d9d0c7;
+        background: rgba(255, 247, 237, 0.05);
+        border: 1px solid rgba(247, 232, 214, 0.14);
+        border-radius: 6px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .simulation-controls button.is-active,
+      .simulation-controls button.simulation-pause[aria-pressed='true'] {
+        color: #fff3e4;
+        background: rgba(186, 111, 69, 0.62);
+        border-color: rgba(242, 184, 126, 0.58);
+      }
+
+      .simulation-speed-note {
+        margin: 5px 0 0;
+        color: #a9a097;
+        font-size: 9px;
       }
 
       .selected-cell {
@@ -596,8 +756,10 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   private gameScene: import('./game-scene').GameScene | null = null;
   private isDestroyed = false;
   private autosaveTimer: ReturnType<typeof setInterval> | null = null;
-  private vehicleSimulationTimer: ReturnType<typeof setInterval> | null = null;
-  private lastVehicleSimulationAt = performance.now();
+  private simulationTimer: ReturnType<typeof setInterval> | null = null;
+  private lastSimulationAt = performance.now();
+  private simulationClock: SimulationClockState = { productionAccumulatorSeconds: 0 };
+  private productionTicksSinceCourierDispatch = 0;
   private autosavePromise: Promise<boolean> | null = null;
   world: WorldSessionData | null = this.sessionRuntime.getActiveWorld();
   private occupancy: CellOccupancy = createEmptyOccupancy();
@@ -616,12 +778,15 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   manualSaveName = '';
   isSaving = false;
   isLeaving = false;
+  readonly simulationSpeeds = SIMULATION_SPEEDS;
+  simulationSpeed: SimulationSpeed = 1;
+  isSimulationPaused = false;
 
   ngAfterViewInit(): void {
     if (!this.world) {
       void this.router.navigate(['/load-save'], {
         queryParams: { reason: 'session-unavailable' },
-      });
+      }).catch(() => undefined);
       return;
     }
 
@@ -652,7 +817,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     this.autosaveTimer = setInterval(() => {
       void this.performAutosave();
     }, AUTOSAVE_INTERVAL_MS);
-    this.startVehicleSimulationTimer();
+    this.startSimulationTimer();
 
     void import('./game-scene')
       .then(({ GameScene }) => {
@@ -1398,34 +1563,20 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       : `Unassigned ${selectedMine.mineBuildingId}.`;
   }
 
-  runSimulationTick(): void {
-    if (!this.world || this.isSaving) {
+  toggleSimulationPause(): void {
+    if (!this.world || this.isLeaving) {
       return;
     }
-    const result = runMineralProductionTick(
-      this.world.gameplay.production,
-      this.world.gameplay.placedBuildings,
-    );
-    const dispatch = dispatchCourierVans(
-      result.production,
-      this.world.gameplay.vehicles,
-      this.world.gameplay.placedBuildings,
-      this.world.gameplay.roads,
-      this.constructionDefinitions,
-    );
-    this.updatePlacedBuildings(
-      this.world.gameplay.placedBuildings,
-      dispatch.production,
-      this.world.gameplay.roads,
-      dispatch.vehicles,
-    );
-    this.placementMessage = dispatch.dispatchedVans > 0
-      ? `Tick ${result.production.tick}: dispatched ${dispatch.dispatchedUnits} mineral units in ${dispatch.dispatchedVans} courier van${dispatch.dispatchedVans === 1 ? '' : 's'}.`
-      : dispatch.blockedDeliveries > 0
-        ? `Tick ${result.production.tick}: mineral output is buffered until a road route is available.`
-        : result.buffered > 0
-          ? `Tick ${result.production.tick}: ${result.buffered} mineral units buffered.`
-          : `Tick ${result.production.tick}: no mineral output available.`;
+    this.isSimulationPaused = !this.isSimulationPaused;
+    this.resetSimulationTimeAnchor();
+  }
+
+  setSimulationSpeed(speed: SimulationSpeed): void {
+    if (!this.simulationSpeeds.includes(speed)) {
+      return;
+    }
+    this.simulationSpeed = speed;
+    this.resetSimulationTimeAnchor();
   }
 
   async leaveWorld(): Promise<void> {
@@ -1433,11 +1584,11 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       return;
     }
     this.isLeaving = true;
-    this.stopVehicleSimulationTimer();
+    this.stopSimulationTimer();
     const autosaved = await this.performAutosave();
     if (!autosaved) {
       this.isLeaving = false;
-      this.startVehicleSimulationTimer();
+      this.startSimulationTimer();
       return;
     }
     this.stopAutosaveTimer();
@@ -1448,7 +1599,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.isDestroyed = true;
     this.stopAutosaveTimer();
-    this.stopVehicleSimulationTimer();
+    this.stopSimulationTimer();
     this.sessionRuntime.clearActiveWorld();
     this.gameScene?.destroy();
   }
@@ -1494,63 +1645,91 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     }
   }
 
-  private startVehicleSimulationTimer(): void {
-    if (this.vehicleSimulationTimer !== null) {
+  private startSimulationTimer(): void {
+    if (this.simulationTimer !== null) {
       return;
     }
-    this.lastVehicleSimulationAt = performance.now();
-    this.vehicleSimulationTimer = setInterval(
-      () => this.advanceVehicleSimulation(),
+    this.resetSimulationTimeAnchor();
+    this.simulationTimer = setInterval(
+      () => this.advanceSimulation(),
       VEHICLE_SIMULATION_STEP_SECONDS * 1_000,
     );
   }
 
-  private stopVehicleSimulationTimer(): void {
-    if (this.vehicleSimulationTimer !== null) {
-      clearInterval(this.vehicleSimulationTimer);
-      this.vehicleSimulationTimer = null;
+  private stopSimulationTimer(): void {
+    if (this.simulationTimer !== null) {
+      clearInterval(this.simulationTimer);
+      this.simulationTimer = null;
     }
   }
 
-  private advanceVehicleSimulation(): void {
+  private resetSimulationTimeAnchor(): void {
+    this.lastSimulationAt = performance.now();
+  }
+
+  private advanceSimulation(): void {
     const now = performance.now();
-    const elapsed = Math.min(
+    const realElapsed = Math.min(
       VEHICLE_SIMULATION_MAX_DELTA_SECONDS,
-      Math.max(0, (now - this.lastVehicleSimulationAt) / 1_000),
+      Math.max(0, (now - this.lastSimulationAt) / 1_000),
     );
-    this.lastVehicleSimulationAt = now;
-    if (!this.world || this.isSaving || this.isLeaving) {
+    this.lastSimulationAt = now;
+    if (!this.world || this.isSaving || this.isLeaving || this.isSimulationPaused) {
       return;
     }
 
-    const advanced = this.world.gameplay.vehicles.length > 0
-      ? advanceCourierVans(
-        this.world.gameplay.production,
-        this.world.gameplay.vehicles,
-        elapsed,
-      )
-      : {
-        production: this.world.gameplay.production,
-        vehicles: this.world.gameplay.vehicles,
-        deliveredUnits: 0,
-        arrivedVans: 0,
-      };
-    const dispatch = dispatchCourierVans(
-      advanced.production,
-      advanced.vehicles,
-      this.world.gameplay.placedBuildings,
-      this.world.gameplay.roads,
-      this.constructionDefinitions,
+    const clockAdvance = advanceSimulationClock(
+      this.simulationClock,
+      realElapsed,
+      this.simulationSpeed,
     );
-    this.updatePlacedBuildings(
-      this.world.gameplay.placedBuildings,
-      dispatch.production,
-      this.world.gameplay.roads,
-      dispatch.vehicles,
-      false,
-    );
-    if (advanced.deliveredUnits > 0) {
-      this.placementMessage = `Courier van delivered ${advanced.deliveredUnits} mineral units.`;
+    this.simulationClock = clockAdvance.state;
+    if (clockAdvance.steps.length === 0) {
+      return;
+    }
+
+    let production = this.world.gameplay.production;
+    let vehicles = this.world.gameplay.vehicles;
+    let worldChanged = false;
+    for (const step of clockAdvance.steps) {
+      if (step.elapsedSeconds > Number.EPSILON && vehicles.length > 0) {
+        const advanced = advanceCourierVans(production, vehicles, step.elapsedSeconds);
+        production = advanced.production;
+        vehicles = advanced.vehicles;
+        worldChanged = true;
+      }
+      if (!step.runProductionTick) {
+        continue;
+      }
+      const result = runMineralProductionTick(
+        production,
+        this.world.gameplay.placedBuildings,
+      );
+      production = result.production;
+      this.productionTicksSinceCourierDispatch += 1;
+      if (this.productionTicksSinceCourierDispatch >= COURIER_DISPATCH_INTERVAL_TICKS) {
+        const dispatch = dispatchCourierVans(
+          production,
+          vehicles,
+          this.world.gameplay.placedBuildings,
+          this.world.gameplay.roads,
+          this.constructionDefinitions,
+        );
+        production = dispatch.production;
+        vehicles = dispatch.vehicles;
+        this.productionTicksSinceCourierDispatch = 0;
+      }
+      worldChanged = true;
+    }
+
+    if (worldChanged) {
+      this.updatePlacedBuildings(
+        this.world.gameplay.placedBuildings,
+        production,
+        this.world.gameplay.roads,
+        vehicles,
+        false,
+      );
     }
   }
 

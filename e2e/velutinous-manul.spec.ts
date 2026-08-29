@@ -118,6 +118,7 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await page.getByRole('button', { name: /Accept World/ }).click();
     await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
     await waitForStreamingSettled(page);
+    await pauseSimulation(page);
 
     await page.getByRole('button', { name: 'Warehouse', exact: true }).click();
     await page.getByTestId('place-starting-warehouse').click();
@@ -195,9 +196,8 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     });
     await expect(warehouseDestination).toHaveValue(warehouseIds[0]);
     await expect(page.getByTestId('mine-assigned-warehouse')).toContainText(warehouseIds[0]);
-    await page.getByTestId('run-production-tick').click();
-    await expect(page.getByTestId('production-tick')).toContainText('Simulation tick: 1');
-    await expect(page.getByTestId('mine-produced-total')).toContainText('10');
+    await runUntilFirstMineTickAndPause(page);
+    await expect(page.getByTestId('mine-produced-total')).toHaveText('Produced: 10');
     await expect(page.getByTestId('mine-delivered-total')).toContainText('0');
     await expect(page.getByTestId('mine-output-buffer')).toContainText('10');
     await expect(page.getByTestId('blocked-delivery-count')).toContainText('1');
@@ -258,6 +258,7 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     await page.getByRole('button', { name: /Accept World/ }).click();
     await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
     await waitForStreamingSettled(page);
+    await pauseSimulation(page);
 
     await page.getByRole('button', { name: 'Warehouse', exact: true }).click();
     await page.getByTestId('place-starting-warehouse').click();
@@ -284,7 +285,8 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     );
     await warehouseDestination.selectOption(warehouseIds[0]);
     await page.getByRole('button', { name: 'Assign Warehouse', exact: true }).click();
-    await page.getByTestId('run-production-tick').click();
+    await runUntilFirstMineTickAndPause(page);
+    await expect(page.getByTestId('mine-produced-total')).toHaveText('Produced: 10');
     await expect(page.getByTestId('mine-delivered-total')).toContainText('0');
     await expect(page.getByTestId('mine-output-buffer')).toContainText('10');
 
@@ -304,10 +306,41 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     const savedRow = page.locator('.save-row').filter({ hasText: 'Road Network Round Trip' });
     await savedRow.getByRole('button', { name: 'Load', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await pauseSimulation(page);
     await expect(page.getByTestId('road-count')).toContainText('3');
     await expect(page.getByTestId('road-layout')).toHaveAttribute('data-road-layout', roadLayout!);
     await expect(page.getByTestId('warehouse-inventory-list')).toBeVisible();
     await expect(page.getByTestId(`warehouse-inventory-${warehouseIds[0]}-${resourceSuffix}`)).toContainText('0');
+  });
+
+  test('pauses the simulation and applies 2× and 4× speeds', async ({ page }) => {
+    await prepareInitialWorld(page);
+    await page.getByRole('button', { name: /Accept World/ }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await waitForStreamingSettled(page);
+    await pauseSimulation(page);
+
+    const readSimulationTick = async (): Promise<number> => {
+      const text = await page.getByTestId('simulation-tick').textContent();
+      return Number(text?.match(/\d+/)?.[0] ?? Number.NaN);
+    };
+    const pausedTick = await readSimulationTick();
+    await page.waitForTimeout(700);
+    expect(await readSimulationTick()).toBe(pausedTick);
+
+    await page.getByTestId('simulation-speed-2').click();
+    await page.getByTestId('simulation-pause').click();
+    await page.waitForTimeout(1_200);
+    await page.getByTestId('simulation-pause').click();
+    const twoXTick = await readSimulationTick();
+    expect(twoXTick - pausedTick).toBeGreaterThanOrEqual(2);
+
+    await page.getByTestId('simulation-speed-4').click();
+    await page.getByTestId('simulation-pause').click();
+    await page.waitForTimeout(1_200);
+    await page.getByTestId('simulation-pause').click();
+    const fourXTick = await readSimulationTick();
+    expect(fourXTick - twoXTick).toBeGreaterThanOrEqual(4);
   });
 
   test('locks generation input and exercises exploration controls', async ({ page }, testInfo) => {
@@ -563,6 +596,32 @@ async function prepareInitialWorld(page: Page): Promise<void> {
   await expect(page.getByLabel('World seed')).toHaveValue(DETERMINISTIC_SEED);
   await page.getByRole('button', { name: /Explore Map/ }).click();
   await waitForStreamingSettled(page);
+}
+
+async function pauseSimulation(page: Page): Promise<void> {
+  await expect(page.getByTestId('simulation-status')).toHaveText('Running');
+  await page.getByTestId('simulation-pause').click();
+  await expect(page.getByTestId('simulation-status')).toHaveText('Paused');
+}
+
+async function runUntilFirstMineTickAndPause(page: Page): Promise<void> {
+  await page.getByTestId('simulation-pause').click();
+  await page.waitForFunction(() => {
+    const angular = (window as unknown as {
+      ng?: { getComponent?: (element: Element) => any };
+    }).ng;
+    const host = document.querySelector('app-world-session');
+    const component = host && angular?.getComponent?.(host);
+    const mine = component?.world?.gameplay?.production?.mines?.[0];
+    if (!component || !mine || mine.producedTotal < 10) {
+      return false;
+    }
+    if (!component.isSimulationPaused) {
+      component.toggleSimulationPause();
+    }
+    return component.isSimulationPaused;
+  });
+  await expect(page.getByTestId('simulation-status')).toHaveText('Paused');
 }
 
 async function waitForWorldReady(page: Page): Promise<void> {
