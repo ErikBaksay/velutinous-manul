@@ -2,6 +2,7 @@ import {
   AfterViewInit,
   Component,
   ElementRef,
+  HostListener,
   OnDestroy,
   ViewChild,
   inject,
@@ -28,6 +29,7 @@ import {
   getOccupyingBuildingId,
   mergeClearedCellIndices,
   removeRoad,
+  ROAD_CONNECTION_MASK,
   type CellCoordinate,
   type CellOccupancy,
   type PlacementValidationResult,
@@ -57,6 +59,16 @@ import {
   AUTOSAVE_INTERVAL_MS,
 } from './save/save-persistence';
 import { WorldSessionRuntime } from './session-runtime';
+import { GameplayShell } from './gameplay-ui/gameplay-shell';
+import type {
+  GameplaySimulationSpeed,
+  GameplayTool,
+  MineralDepositOption,
+  SystemsDrawerTab,
+  TownSummary,
+  WarehouseOption,
+  WorldOverviewSummary,
+} from './gameplay-ui/models';
 import {
   addMineProductionState,
   addWarehouseProductionState,
@@ -152,10 +164,87 @@ export function advanceSimulationClock(
 @Component({
   selector: 'app-world-session',
   standalone: true,
+  imports: [GameplayShell],
   template: `
     <main #sceneFrame class="world-frame" aria-label="Velutinous Manul world session">
       <canvas #gameCanvas tabindex="0" aria-label="Interactive world camera"></canvas>
 
+      <app-gameplay-shell
+        [startingCell]="world?.map?.generationSummary?.startingCell ?? null"
+        [saveMessage]="saveMessage"
+        [saveError]="saveError"
+        [summary]="worldOverviewSummary"
+        [warehouseInventories]="warehouseProductionStates"
+        [roadCount]="roadStates.length"
+        [roadLayout]="roadLayout"
+        [isLeaving]="isLeaving"
+        [activeTool]="activeTool"
+        [mineralDeposits]="mineralDepositOptions"
+        [mineralDepositSelection]="mineralDepositSelection"
+        [placementPreviewValid]="placementPreview?.valid ?? false"
+        [placementMessage]="placementMessage"
+        [placementMessageIsError]="hasPlacementError"
+        [inspectorOpen]="inspectorOpen"
+        [selectedBuilding]="selectedBuilding"
+        [selectedRoad]="selectedRoad"
+        [selectedTown]="selectedTown"
+        [selectedTownCapacity]="selectedTown ? getTownCapacity(selectedTown) : null"
+        [buildingLabel]="selectedBuildingLabel"
+        [buildingSubtitle]="selectedBuildingSubtitle"
+        [foundingChurch]="foundingChurch"
+        [foundationEvaluation]="foundationEvaluation"
+        [eligibleResidenceCount]="foundationEvaluation?.eligibleResidentialBuildingIds?.length ?? 0"
+        [selectedMineProduction]="selectedMineProduction"
+        [selectedWarehouseInventory]="selectedWarehouseInventory"
+        [warehouseOptions]="warehouseOptions"
+        [warehouseInventories]="warehouseProductionStates"
+        [selectedWarehouseDestination]="selectedWarehouseDestination"
+        [roadConnections]="selectedRoadConnectionLabel"
+        [roadMask]="selectedRoadMask"
+        [churchProtected]="isSelectedChurchProtected"
+        [influenceVisible]="townInfluenceVisible"
+        [churchDefinitionId]="velutinousManulChurchDefinitionId"
+        [residentialDefinitionId]="velutinousManulResidentialDefinitionId"
+        [townSummaries]="townSummaries"
+        [sceneError]="sceneError"
+        [showTownFoundingDialog]="showTownFoundingDialog"
+        [townName]="townName"
+        [townNameError]="townNameError"
+        [showSaveDialog]="showSaveDialog"
+        [manualSaveName]="manualSaveName"
+        [isSaving]="isSaving"
+        [simulationPaused]="isSimulationPaused"
+        [simulationSpeed]="simulationSpeed"
+        [simulationTick]="world?.gameplay?.production?.tick ?? 0"
+        [simulationSpeeds]="simulationSpeeds"
+        (toolChange)="handleToolChange($event)"
+        (depositChange)="mineralDepositSelection = $event"
+        (focusDeposit)="focusSelectedMineralDeposit()"
+        (prepareMine)="prepareSelectedMineralDepositPlacement()"
+        (placeFocusedMine)="placeFocusedMine()"
+        (placeStartingWarehouse)="placeWarehouseAtStartingArea()"
+        (cancelPlacement)="cancelPlacement()"
+        (closeInspector)="clearSelection()"
+        (openFoundTown)="openFoundTownDialog()"
+        (confirmFoundTown)="foundTown()"
+        (focusTown)="focusTownById($event)"
+        (toggleInfluence)="toggleTownInfluence($event)"
+        (warehouseChange)="setWarehouseDestination($event)"
+        (assignWarehouse)="assignSelectedMineWarehouse()"
+        (removeBuilding)="removeSelectedBuilding()"
+        (removeRoad)="removeSelectedRoad()"
+        (save)="openSaveDialog()"
+        (leave)="leaveWorld()"
+        (townNameChange)="townName = $event; townNameError = null"
+        (closeTownDialog)="closeFoundTownDialog()"
+        (saveNameChange)="manualSaveName = $event"
+        (confirmSave)="saveManual()"
+        (closeSaveDialog)="closeSaveDialog()"
+        (toggleSimulationPause)="toggleSimulationPause()"
+        (speedChange)="setSimulationSpeed($event)"
+      />
+
+      @if (legacyHudEnabled) {
       <section class="world-hud" aria-labelledby="world-title">
         <p class="eyebrow">VELUTINOUS MANUL</p>
         <h1 id="world-title">World Session</h1>
@@ -478,6 +567,7 @@ export function advanceSimulationClock(
           {{ isLeaving ? 'Saving…' : 'Leave World' }}
         </button>
       </section>
+      }
     </main>
   `,
   styles: [
@@ -858,11 +948,39 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   showTownFoundingDialog = false;
   townName = '';
   townNameError: string | null = null;
+  inspectorOpen = false;
+  townInfluenceVisible = true;
   isSaving = false;
   isLeaving = false;
   readonly simulationSpeeds = SIMULATION_SPEEDS;
   simulationSpeed: SimulationSpeed = 1;
   isSimulationPaused = false;
+  readonly legacyHudEnabled = false;
+
+  readonly velutinousManulChurchDefinitionId = VELUTINOUS_MANUL_CHURCH_DEFINITION_ID;
+  readonly velutinousManulResidentialDefinitionId = VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID;
+
+  @HostListener('document:keydown', ['$event'])
+  handleGlobalKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape') {
+      return;
+    }
+    if (this.showTownFoundingDialog) {
+      this.closeFoundTownDialog();
+      return;
+    }
+    if (this.showSaveDialog) {
+      this.closeSaveDialog();
+      return;
+    }
+    if (this.activeTool !== 'select') {
+      this.cancelPlacement();
+      return;
+    }
+    if (this.inspectorOpen) {
+      this.clearSelection();
+    }
+  }
 
   ngAfterViewInit(): void {
     if (!this.world) {
@@ -1034,12 +1152,146 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     }
   }
 
+  handleToolChange(tool: GameplayTool): void {
+    switch (tool) {
+      case 'select':
+        this.selectTool();
+        return;
+      case 'mine':
+        this.activateMineTool();
+        return;
+      case 'warehouse':
+        this.activateWarehouseTool();
+        return;
+      case 'church':
+        this.activateChurchTool();
+        return;
+      case 'residential':
+        this.activateResidentialTool();
+        return;
+      case 'road':
+        this.activateRoadTool();
+        return;
+    }
+  }
+
   cancelPlacement(): void {
     this.selectTool();
   }
 
+  clearSelection(): void {
+    this.selectedCell = null;
+    this.inspectorOpen = false;
+    this.gameScene?.setSelectedCell(null);
+    this.syncTownVisualState();
+  }
+
+  focusTownById(townId: string): void {
+    const town = this.towns.find((candidate) => candidate.id === townId);
+    const church = town && this.world?.gameplay.placedBuildings.find((building) =>
+      building.id === town.churchBuildingId,
+    );
+    if (!town || !church) {
+      return;
+    }
+    this.selectCell(church.origin);
+    this.gameScene?.focusCell(church.origin);
+  }
+
+  toggleTownInfluence(_townId: string): void {
+    this.townInfluenceVisible = !this.townInfluenceVisible;
+    this.syncTownVisualState();
+  }
+
+  setWarehouseDestination(value: string): void {
+    this.warehouseSelection = value;
+    this.warehouseSelectionChanged = true;
+  }
+
   get towns(): readonly TownState[] {
     return this.world?.gameplay.towns ?? [];
+  }
+
+  get townSummaries(): readonly TownSummary[] {
+    return this.towns.map((town) => {
+      const capacity = getTownCapacity(town);
+      return {
+        id: town.id,
+        name: town.name,
+        residenceCount: town.residentialBuildingIds.length,
+        populationCapacity: capacity.population,
+        workerCapacity: capacity.workers,
+      };
+    });
+  }
+
+  get worldOverviewSummary(): WorldOverviewSummary {
+    const transport = this.transportSummary;
+    const warehouses = this.warehouseProductionStates;
+    return {
+      townCount: this.towns.length,
+      populationCapacity: this.towns.reduce(
+        (total, town) => total + getTownCapacity(town).population,
+        0,
+      ),
+      workerCapacity: this.towns.reduce(
+        (total, town) => total + getTownCapacity(town).workers,
+        0,
+      ),
+      activeVans: transport.activeVans,
+      pendingDeliveries: transport.pendingDeliveries,
+      blockedDeliveries: transport.blockedDeliveries,
+      completedDeliveries: transport.completedDeliveries,
+      warehouseCount: warehouses.length,
+      storedIronOre: warehouses.reduce((total, warehouse) => total + warehouse.quantities['iron-ore'], 0),
+      storedCopperOre: warehouses.reduce((total, warehouse) => total + warehouse.quantities['copper-ore'], 0),
+      storedStone: warehouses.reduce((total, warehouse) => total + warehouse.quantities.stone, 0),
+      presetLabel: this.world ? formatWorldPresetLabel(this.world.map.configuration.preset) : 'Balanced Continental',
+    };
+  }
+
+  get mineralDepositOptions(): readonly MineralDepositOption[] {
+    return this.mineralDeposits.map((deposit) => ({ id: deposit.id, kind: deposit.kind }));
+  }
+
+  get warehouseOptions(): readonly WarehouseOption[] {
+    return this.warehouseBuildings.map((warehouse, index) => ({
+      id: warehouse.id,
+      label: `Warehouse ${index + 1}`,
+    }));
+  }
+
+  get selectedBuildingLabel(): string {
+    return this.selectedBuilding ? getBuildingLabel(this.selectedBuilding.definitionId) : 'Building';
+  }
+
+  get selectedBuildingSubtitle(): string {
+    if (this.selectedTown) {
+      return this.selectedTown.name;
+    }
+    if (this.selectedBuilding?.definitionId === VELUTINOUS_MANUL_RESIDENTIAL_01_DEFINITION_ID) {
+      return 'Housing';
+    }
+    if (this.selectedBuilding?.definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID) {
+      return 'Civic building';
+    }
+    return 'Construction';
+  }
+
+  get selectedRoadConnectionLabel(): string {
+    return formatRoadConnections(this.selectedRoadMask);
+  }
+
+  get hasPlacementError(): boolean {
+    return (this.placementPreview !== null && !this.placementPreview.valid) ||
+      (this.roadPlacementPreview !== null && !this.roadPlacementPreview.valid);
+  }
+
+  get isSelectedChurchProtected(): boolean {
+    const selectedBuilding = this.selectedBuilding;
+    return selectedBuilding?.definitionId === VELUTINOUS_MANUL_CHURCH_DEFINITION_ID &&
+      this.towns.some((town) => town.churchBuildingId === selectedBuilding.id &&
+        town.residentialBuildingIds.length > 0);
   }
 
   get selectedTown(): TownState | null {
@@ -1185,7 +1437,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
   }
 
   get mineralDeposits(): readonly WorldSessionData['map']['authoritativeData']['deposits'][number][] {
-    return this.world?.map.authoritativeData.deposits ?? [];
+    return this.world?.map?.authoritativeData?.deposits ?? [];
   }
 
   get selectedWarehouseInventory(): WorldSessionData['gameplay']['production']['warehouses'][number] | null {
@@ -1274,21 +1526,17 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       removeRoad(this.world.gameplay.roads, selectedRoad.cell),
     );
     this.dispatchAvailableCourierVans();
-    this.placementMessage = `Removed the road at ${selectedRoad.cell.x}, ${selectedRoad.cell.y}.`;
+    this.placementMessage = 'Removed road segment.';
     this.selectCell(selectedRoad.cell);
   }
 
   private selectCell(cell: CellCoordinate): void {
     this.selectedCell = { x: cell.x, y: cell.y };
+    this.inspectorOpen = this.selectedBuilding !== null || this.selectedRoad !== null;
     this.warehouseSelection = this.selectedMineProduction?.assignedWarehouseId ?? '';
     this.warehouseSelectionChanged = false;
     this.gameScene?.setSelectedCell(this.selectedCell);
-    this.gameScene?.setTownVisualState(
-      this.towns,
-      this.world?.gameplay.placedBuildings ?? [],
-      this.constructionDefinitions,
-      this.foundingChurch?.id ?? null,
-    );
+    this.syncTownVisualState();
   }
 
   private handleCellHover(cell: CellCoordinate): void {
@@ -1409,7 +1657,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     );
     this.dispatchAvailableCourierVans();
     this.selectCell(origin);
-    this.placementMessage = `Placed ${label} at ${origin.x}, ${origin.y}.`;
+    this.placementMessage = `Placed ${label}.`;
     this.placementPreview = null;
     this.gameScene?.setPlacementPreview(null);
   }
@@ -1437,7 +1685,7 @@ export class WorldSession implements AfterViewInit, OnDestroy {
     );
     this.dispatchAvailableCourierVans();
     this.selectCell(cell);
-    this.placementMessage = `Placed road at ${cell.x}, ${cell.y}.`;
+    this.placementMessage = 'Placed road segment.';
     this.roadPlacementPreview = null;
     this.gameScene?.setRoadPreview(null);
   }
@@ -1750,9 +1998,20 @@ export class WorldSession implements AfterViewInit, OnDestroy {
         this.world?.gameplay.placedBuildings ?? [],
         this.constructionDefinitions,
         this.foundingChurch?.id ?? null,
+        this.townInfluenceVisible,
       );
     }
     this.gameScene?.setCourierVans(this.world?.gameplay.vehicles ?? []);
+  }
+
+  private syncTownVisualState(): void {
+    this.gameScene?.setTownVisualState(
+      this.world?.gameplay.towns ?? [],
+      this.world?.gameplay.placedBuildings ?? [],
+      this.constructionDefinitions,
+      this.foundingChurch?.id ?? null,
+      this.townInfluenceVisible,
+    );
   }
 
   private getClearedCellIndices(
@@ -1840,15 +2099,26 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       selectedMine.mineBuildingId,
       warehouseId,
     );
-    this.updatePlacedBuildings(this.world.gameplay.placedBuildings, production);
+    // Assignment changes simulation state only; avoid rebuilding every authored
+    // building mesh when the scene itself has not changed.
+    this.updatePlacedBuildings(
+      this.world.gameplay.placedBuildings,
+      production,
+      this.world.gameplay.roads,
+      this.world.gameplay.vehicles,
+      false,
+    );
     this.dispatchAvailableCourierVans();
     this.warehouseSelection = this.world.gameplay.production.mines.find((mine) =>
       mine.mineBuildingId === selectedMine.mineBuildingId,
     )?.assignedWarehouseId ?? '';
     this.warehouseSelectionChanged = false;
-    this.placementMessage = warehouseId
-      ? `Assigned ${selectedMine.mineBuildingId} to ${warehouseId}.`
-      : `Unassigned ${selectedMine.mineBuildingId}.`;
+    const warehouseLabel = warehouseId
+      ? this.warehouseOptions.find((warehouse) => warehouse.id === warehouseId)?.label ?? 'the warehouse'
+      : null;
+    this.placementMessage = warehouseLabel
+      ? `Assigned the mine to ${warehouseLabel}.`
+      : 'Unassigned the mine from its warehouse.';
   }
 
   toggleSimulationPause(): void {
@@ -2042,6 +2312,26 @@ export class WorldSession implements AfterViewInit, OnDestroy {
       dispatch.vehicles,
     );
   }
+}
+
+function formatWorldPresetLabel(preset: WorldSessionData['map']['configuration']['preset']): string {
+  switch (preset) {
+    case 'riverlands':
+      return 'Riverlands';
+    case 'highland-frontier':
+      return 'Highland Frontier';
+    default:
+      return 'Balanced Continental';
+  }
+}
+
+function formatRoadConnections(mask: number): string {
+  const directions: string[] = [];
+  if ((mask & ROAD_CONNECTION_MASK.north) !== 0) directions.push('north');
+  if ((mask & ROAD_CONNECTION_MASK.east) !== 0) directions.push('east');
+  if ((mask & ROAD_CONNECTION_MASK.south) !== 0) directions.push('south');
+  if ((mask & ROAD_CONNECTION_MASK.west) !== 0) directions.push('west');
+  return directions.length > 0 ? `Connected ${directions.join(', ')}` : 'Standalone road segment';
 }
 
 function createEmptyOccupancy(): CellOccupancy {

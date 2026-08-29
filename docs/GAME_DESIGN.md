@@ -234,6 +234,32 @@ worker settlement
 
 Later settlement needs may include housing, electricity, food, consumer goods, jobs, road access, and services. Individual citizens should not be simulated unless a later design decision demonstrates a compelling need.
 
+### Gameplay interface direction
+
+The in-world gameplay screen keeps the map visually dominant and uses a layered
+HUD rather than a permanently expanded information rail:
+
+- A compact top status bar shows the world/save state, town count, population
+  and worker capacity, and transport/storage alerts.
+- A left construction toolbar contains Select, Mine, Warehouse, Church,
+  Residence, and Road. Building and road tools remain active for repeat
+  placement until the player chooses Select or presses Escape.
+- A contextual right inspector opens for a selected building, road, or town.
+  It explains placement and founding rules, type-specific details, town
+  capacity, focus/influence controls, and removal behavior.
+- An Overview drawer organizes secondary information into Towns, Logistics,
+  Storage, and World tabs. Long lists scroll inside their panel; the page does
+  not acquire a gameplay scroll state.
+- A bottom simulation bar contains pause/resume and speed controls. Temporary
+  placement, save, and validation feedback appears as a toast near the map.
+
+Town founding is performed from the selected church or residence inspector.
+The player sees a church/residence checklist, then confirms a trimmed unique
+name in a focused modal. Town labels, center markers, and influence previews
+provide map feedback. Normal gameplay text uses human-readable names and
+summaries; raw IDs, cell coordinates, road dumps, and simulation ticks remain
+available only through debug tooling.
+
 ## Economy and progression
 
 Economics should create meaningful operational decisions without turning the game into a spreadsheet. Possible concepts include construction costs, operating costs, vehicle costs, production profitability, resource value, logistics cost, electricity costs, maintenance, and efficiency differences.

@@ -626,6 +626,7 @@ export class GameScene {
     buildings: readonly PlacedBuildingState[],
     definitions: ReadonlyMap<string, BuildingDefinition>,
     foundingChurchId: string | null = null,
+    showInfluence = true,
   ): void {
     this.clearTownVisuals();
     if (!this.mapData) {
@@ -641,12 +642,14 @@ export class GameScene {
       const townBuildings = [church, ...town.residentialBuildingIds
         .map((id) => buildingsById.get(id))
         .filter((building): building is PlacedBuildingState => building !== undefined)];
-      this.townVisuals.add(createTownInfluenceVisual(
-        this.mapData,
-        townBuildings,
-        definitions,
-        0x94ddb0,
-      ));
+      if (showInfluence) {
+        this.townVisuals.add(createTownInfluenceVisual(
+          this.mapData,
+          townBuildings,
+          definitions,
+          0x94ddb0,
+        ));
+      }
       const markerPosition = getBuildingWorldCenter(this.mapData, church, definitions);
       if (markerPosition) {
         this.townVisuals.add(createTownMarkerVisual(

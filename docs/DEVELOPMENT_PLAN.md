@@ -11,8 +11,8 @@ Every implementation milestone is small enough to run and manually test. Work pa
 - **Final target:** A browser-first 3D sandbox logistics and industry builder with beautiful traditional settlements, modern industry, and electric road transportation.
 - **Current development stage:** Stage 1 — browser and 3D foundation with the first generic mine-to-warehouse and church-centered town-building slices implemented; Map Generation v1 Gate 6.3 approved for map creation and preview.
 - **Completed work:** Repository inspection; game direction captured in `GAME_DESIGN.md`; incremental workflow captured in `PROJECT_WORKFLOW.md` and this document; Map Generation v1 Gates 1 and 2 plus Gate 3, Gates 4.1–4.2, Gate 5.1, Gate 5.2a–5.2b, Gate 5.3, Gates 6.1–6.3 implemented and manually approved; Milestone 2 dedicated start screen and session routing; Milestone 3 IndexedDB, autosave, named saves, and portable import/export; Milestone 5 pure construction data, footprint, occupancy, and placement validation foundations; Milestone 6 terrain selection, placement, removal, and save/reload; Milestones 7–8 classical shaft-house asset contract and authored runtime integration; Milestone 9 arcaded warehouse authored asset and construction integration; Milestone 10 generic mineral production and warehouse transfer; Milestone 11 construction-aware natural-item clearing.
-- **Current task:** Manually review the first playable church-centered town loop. The current church and Residential Building 01 masters are integrated behind stable runtime IDs; construction, founding, chained growth, capacity, persistence, and protected-church removal are ready for browser review.
-- **Next planned work:** Review the town loop and authored-building presentation, then tune attached terrace planters/vegetation and final procedural residential surfaces as a separate art pass.
+- **Current task:** Manually review the layered gameplay HUD at wide desktop and compact laptop sizes. The current church and Residential Building 01 masters are integrated behind stable runtime IDs; construction, founding, chained growth, capacity, persistence, protected-church removal, and the on-demand gameplay UI are ready for browser review.
+- **Next planned work:** Review the HUD shell, construction/founding interaction, overview drawer, saving, and accessibility at the two target sizes, then tune attached terrace planters/vegetation and final procedural residential surfaces as a separate art pass.
 - **Deferred systems:** Remaining production chains, physical trucks beyond courier vans, advanced settlements/services, electricity, procedural generation, economy, progression, large maps, and all other systems listed as long-term scope until their prerequisites are working.
 - **Known limitations / technical debt:** Chunk streaming is bounded by the provisional 576-chunk desired budget, so prefetch work can be rejected when a broad view consumes the budget. The camera intentionally limits elevation to 40°–88° and zooms to a map-safe range. Biome, tree, and resource colors are provisional and may receive a later three-option visual design review. Angular's browser unit tests and Playwright runs require a local browser plus permission to bind their test servers; the full-resolution map-generation tests run separately through `npm run test:map`.
 - **Naming convention:** Use the full game name, `Velutinous Manul`, in game-facing text, code-owned identifiers, seeds, save formats, and documentation. Do not abbreviate the project name.
@@ -415,6 +415,35 @@ construction footprints are `7×14` for the church and `10×8` for residences.
 **Pre-model design decision — 2026-08-29:** Every settlement is church-centered. The first playable founding rule is one church plus one residential building within the church's founding area, followed by an explicit town-founding action. The church is an anchor and identity building, not a production chain.
 
 **Church asset primary architecture — 2026-08-29:** The proportional blockout and roof-gap correction are approved. The Blender-first exterior master retains its nominal `12.8 × 28.0 × 27.0 m` envelope, local `-Y` entrance, `Z=0` ground contact, mirrored left elevation, and conservative centered rear annex. The selected hybrid method reserves geometry for architectural relief and uses procedural materials only for subtle finish variation. The current approval gate adds the reference-matched four-window side rhythm, basement vents, bay pilasters, Ionic portico bases/capitals/volutes, layered entablature, paneled entry and upper glazing, pediment oculus, clock face and hands, belfry and lantern apertures, opaque louvers, and inferred annex openings. The tower was moved `0.5 m` toward the facade within the approved envelope so its clock stage remains visible above the front gable as in the references. Stone courses, roof seams, spire ribs, dentils, keystones, fluting, and the finest ornament remain for the final-detail gate. The current master is exported behind stable runtime IDs `church_lod0/1`; game integration uses the calibrated `7×14` grid footprint.
+
+### Milestone 13 — Layered gameplay HUD
+
+- Replace the oversized always-on world-session rail with a map-dominant shell:
+  compact status bar, left construction toolbar, contextual inspector, bottom
+  simulation bar, temporary toasts, and an Overview drawer.
+- Keep Towns, Logistics, Storage, and World information available on demand,
+  while hiding raw IDs, coordinates, road-cell dumps, and simulation ticks from
+  normal gameplay text.
+- Keep construction repeat-placement behavior and move town founding into the
+  selected church/residence inspector with a checklist and focused naming modal.
+- Provide type-specific inspection for churches, residences, mines, warehouses,
+  roads, and towns, including capacity, focus/influence, and protected-church
+  removal state.
+- Preserve the separation between UI view models and construction, settlement,
+  production, persistence, and Three.js rendering boundaries. The shell owns
+  commands and display data; UI components do not access Three.js objects.
+- Verify the HUD at `1440×900` and `1366×768` with no page-level vertical
+  overflow, reachable primary actions, keyboard Escape behavior, modal focus
+  trapping, and accessible active/alert states.
+
+**Implementation status:** Implemented pending manual review. The world session
+now composes focused `GameplayShell`, `GameplayStatusBar`, `BuildToolbar`,
+`SelectionInspector`, `SystemsDrawer`, `SimulationBar`, `FoundTownDialog`, and
+`SaveWorldDialog` components. The layered layout keeps long content inside
+panels, retains the existing start screen, preserves repeat placement and town
+flows, and keeps debug-only compatibility details visually hidden. Focused UI
+component tests and the complete browser unit suite pass; browser layout and
+interaction review remain the next approval gate.
 
 ## Completed first implementation definition
 

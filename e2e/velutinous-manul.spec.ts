@@ -577,6 +577,34 @@ test.describe('Velutinous Manul browser diagnostics', () => {
     expect(fourXTick - twoXTick).toBeGreaterThanOrEqual(4);
   });
 
+  test('keeps the layered gameplay HUD inside wide and compact desktop viewports', async ({ page }) => {
+    await prepareInitialWorld(page);
+    await page.getByRole('button', { name: /Accept World/ }).click();
+    await expect(page.getByRole('heading', { name: 'World Session' })).toBeVisible();
+    await waitForStreamingSettled(page);
+
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1366, height: 768 }]) {
+      await page.setViewportSize(viewport);
+      const layout = await page.evaluate(() => ({
+        documentHeight: document.documentElement.scrollHeight,
+        viewportHeight: window.innerHeight,
+        toolbarBottom: document.querySelector('.build-toolbar')?.getBoundingClientRect().bottom ?? 0,
+        simulationTop: document.querySelector('.simulation-bar')?.getBoundingClientRect().top ?? 0,
+      }));
+      expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
+      expect(layout.toolbarBottom).toBeLessThanOrEqual(layout.viewportHeight);
+      expect(layout.simulationTop).toBeGreaterThan(0);
+      await expect(page.locator('.world-hud')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Church', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Save World', exact: true })).toBeVisible();
+      await expect(page.getByTestId('simulation-pause')).toBeVisible();
+    }
+
+    await page.getByTestId('overview-toggle').click();
+    await expect(page.getByTestId('overview-tab-towns')).toBeVisible();
+    await expect(page.getByTestId('overview-tab-world')).toBeVisible();
+  });
+
   test('locks generation input and exercises exploration controls', async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
     await prepareDeterministicWorld(page);
