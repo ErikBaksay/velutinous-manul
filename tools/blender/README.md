@@ -64,3 +64,20 @@ discard manual edits.
 
 The four visual authorities are kept in `art/vehicles/references/`.  They are
 reference images only; they are not loaded as runtime textures.
+
+## Church exterior master
+
+The settlement church follows the same Blender-first ownership model.  Its
+editable source is `art/buildings/church/church.blend`; the bootstrap is only a
+one-time/recovery authoring helper and refuses to replace an existing source
+unless `--force` is explicitly supplied.
+
+```bash
+blender --background --python tools/blender/author_church.py
+blender --background art/buildings/church/church.blend \
+  --python tools/blender/render_church_preview.py
+```
+
+The church remains an exterior architectural master during visual approval.
+Runtime GLB export, LOD generation, collision, footprint selection, and game
+registration are intentionally deferred.
